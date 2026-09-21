@@ -54,7 +54,7 @@ Direct mode remains the simplest option and does not require constructing a full
 
 - The harness proves the configured in-process test contract. It does not prove broker, database, container, or orchestrator durability.
 - Application code must mark its own readiness, stopping-token, and drain checkpoints. ShutdownSpec does not infer domain state.
-- The harness cannot safely interrupt an arbitrary synchronous infinite loop in the same process. Such a scenario is reported as an in-process control limitation after the bounded harness wait; use process isolation for that requirement.
+- The harness cannot safely interrupt an arbitrary synchronous infinite loop in the same process. Such a scenario is bounded and classified as a deadline or noncompletion outcome; use process isolation for a hard kill boundary.
 - A test deadline is not a production host shutdown timeout. Configure both deliberately for their separate purposes.
 - The package makes no product-owned network requests and emits no telemetry.
 

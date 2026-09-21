@@ -28,6 +28,6 @@ Create a `ShutdownProbe` in the test and mark it from application-owned code. Re
 
 ## Limitations
 
-ShutdownSpec does not infer queue or database drain state, make network requests, collect telemetry, control processes, or replace the host. It cannot safely regain control from an arbitrary synchronous infinite loop in the same process; that limitation is surfaced in the result and diagnostic report.
+ShutdownSpec does not infer queue or database drain state, make network requests, collect telemetry, control processes, or replace the host. It cannot safely regain control from an arbitrary synchronous infinite loop in the same process; the bounded result reports a deadline or noncompletion outcome, and the blocked thread may remain.
 
 See the [canonical lifecycle contract](https://github.com/KeelMatrix/ShutdownSpec/blob/main/docs/contract.md) for outcome codes and failure diagnostics.

@@ -94,6 +94,21 @@ public sealed class ShutdownHarnessTests
     }
 
     [Fact]
+    public async Task SynchronousBlockingStartIsBoundedAndNotClean()
+    {
+        var result = await ShutdownHarness
+            .For(() => new SynchronousBlockingStartService())
+            .WithStartupDeadline(TimeSpan.FromMilliseconds(10))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(100))
+            .WithCleanupDeadline(TimeSpan.FromMilliseconds(20))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.HarnessDeadline, result.Outcome);
+        Assert.True(result.StartupDeadlineFired);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
     public async Task ImmediateStartStopNeverReportsUnenteredExecutionAsClean()
     {
         var results = new List<ShutdownResult>();
@@ -216,6 +231,17 @@ public sealed class ShutdownHarnessTests
     private sealed class HangingStartService : IHostedService
     {
         public Task StartAsync(CancellationToken cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class SynchronousBlockingStartService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            Thread.Sleep(TimeSpan.FromMilliseconds(100));
+            return Task.CompletedTask;
+        }
+
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

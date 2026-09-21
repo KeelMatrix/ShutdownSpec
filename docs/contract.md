@@ -54,4 +54,4 @@ The primary failure codes are:
 
 ## In-process limitation
 
-The harness cannot safely interrupt arbitrary application code that blocks synchronously forever in the same process. It bounds its wait and reports the control limitation, but the blocked thread may remain. Use process isolation when a hard kill boundary is part of the test contract.
+The harness cannot safely interrupt arbitrary application code that blocks synchronously forever in the same process. It bounds its wait and reports a deadline or noncompletion outcome, but the blocked thread may remain. Use process isolation when a hard kill boundary is part of the test contract.

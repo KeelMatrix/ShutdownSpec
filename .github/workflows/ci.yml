@@ -38,7 +38,30 @@ jobs:
         run: dotnet build src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj --configuration Release --no-restore --warnaserror
 
       - name: Run Release test suite
-        run: dotnet test KeelMatrix.ShutdownSpec.sln --configuration Release --no-restore
+        shell: pwsh
+        run: |
+          dotnet test KeelMatrix.ShutdownSpec.sln --configuration Release --no-restore --logger trx
+          $testExitCode = $LASTEXITCODE
+          if ($testExitCode -ne 0) {
+            $failedResults = @(
+              Get-ChildItem -Path . -Recurse -Filter *.trx -File |
+                ForEach-Object {
+                  [xml]$trx = Get-Content -LiteralPath $_.FullName
+                  $trx.TestRun.Results.UnitTestResult | Where-Object Outcome -eq 'Failed'
+                }
+            )
+            if ($failedResults.Count -eq 0) {
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Release test suite failed, but no failed TRX result was found.'
+            }
+            foreach ($failed in $failedResults) {
+              $message = $failed.Output.ErrorInfo.Message
+              if ([string]::IsNullOrWhiteSpace($message)) { $message = 'No failure message was recorded.' }
+              $summary = "- **$($failed.testName)**: $message"
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
+              Write-Output "::error title=Release test failure::$($failed.testName): $message"
+            }
+          }
+          exit $testExitCode
 
       - name: Run Release package gate
         shell: pwsh

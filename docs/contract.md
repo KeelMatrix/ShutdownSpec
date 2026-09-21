@@ -2,6 +2,10 @@
 
 This document defines the v1 result semantics for KeelMatrix.ShutdownSpec. The harness checks an in-process lifecycle contract; it does not replace the host or prove external system durability.
 
+## Supported platforms and dependency boundary
+
+The package is validated on Windows, Linux, and macOS by the repository's public CI matrix. Its dependency/runtime boundary is `Microsoft.Extensions.Hosting` 10.0.12 with `net8.0` and `netstandard2.0` target frameworks. This is the canonical supported-platform statement for the repository; other documentation surfaces should link here when they need the full claim.
+
 ## Scenario lifecycle
 
 1. The factory creates one service instance within the outer harness deadline.

@@ -37,6 +37,10 @@ jobs:
       - name: Run Release test suite
         run: dotnet test KeelMatrix.ShutdownSpec.sln --configuration Release --no-restore
 
+      - name: Audit direct and transitive package vulnerabilities
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/Invoke-VulnerabilityAudit.ps1
+
       - name: Pack exact release artifacts
         shell: pwsh
         run: |

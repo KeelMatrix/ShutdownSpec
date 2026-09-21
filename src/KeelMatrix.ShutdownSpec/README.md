@@ -58,7 +58,7 @@ Create a `ShutdownProbe` in the test and mark it from application-owned code. Re
 
 `WithStartupDeadline`, `WithShutdownDeadline`, and `WithHarnessDeadline` are separate. The host shutdown token passed to `StartAsync`/`StopAsync`, the `BackgroundService` stopping token, the caller cancellation token, and the harness's outer safety deadline are recorded separately. A test deadline does not set or predict a production host timeout.
 
-The package targets `net8.0` and `netstandard2.0` and is validated against `Microsoft.Extensions.Hosting` 10.0.12. It is OS-neutral and intended for supported .NET runtimes on Windows, Linux, and macOS; the current repository evidence covers Windows and Linux, while macOS requires external validation. The package makes no network requests.
+The package targets `net8.0` and `netstandard2.0` and is validated against `Microsoft.Extensions.Hosting` 10.0.12. The repository's public CI matrix validates it on Windows, Linux, and macOS. See the [canonical supported-platform statement](https://github.com/KeelMatrix/ShutdownSpec/blob/main/docs/contract.md#supported-platforms-and-dependency-boundary) for the full compatibility boundary. The package makes no network requests.
 
 ## Limitations
 

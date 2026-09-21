@@ -15,7 +15,9 @@ if (-not $gateRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase
 }
 
 $project = Join-Path $repoRoot 'src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj'
+$solution = Join-Path $repoRoot 'KeelMatrix.ShutdownSpec.sln'
 $smokeProject = Join-Path $repoRoot 'tests/PackageSmoke/PackageSmoke.csproj'
+$auditScript = Join-Path $repoRoot 'scripts/Invoke-VulnerabilityAudit.ps1'
 $feedRoot = Join-Path $gateRoot 'feed'
 $packagesRoot = Join-Path $gateRoot 'packages'
 $artifactRoot = Join-Path $gateRoot 'artifacts'
@@ -142,7 +144,8 @@ if ($PngValidationSelfTest) {
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $nugetConfig = Join-Path $repoRoot 'NuGet.config'
-Invoke-Checked 'dotnet' @('restore', $project, '--configfile', $nugetConfig)
+Invoke-Checked 'dotnet' @('restore', $solution, '--configfile', $nugetConfig)
+& $auditScript -Solution $solution -ConfigFile $nugetConfig
 Invoke-Checked 'dotnet' @('pack', $project, '--configuration', $Configuration, '--no-restore', '--output', $artifactRoot, '--configfile', $nugetConfig)
 
 $artifactNames = @(Get-ChildItem -LiteralPath $artifactRoot -File | ForEach-Object Name | Sort-Object)

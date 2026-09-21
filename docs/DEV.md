@@ -2,6 +2,10 @@
 
 This guide describes the repository-local validation path for KeelMatrix.ShutdownSpec.
 
+## Supported platform evidence
+
+The repository's public CI matrix validates the Release test suite and package gate on Windows, Linux, and macOS. The canonical supported-platform and dependency-boundary statement is maintained in [the lifecycle contract](contract.md#supported-platforms-and-dependency-boundary).
+
 ## Prerequisites
 
 - .NET SDK 8.0.425 or a compatible patch release selected by `global.json`.
@@ -21,7 +25,7 @@ dotnet test KeelMatrix.ShutdownSpec.sln -c Release --no-restore
 pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1
 # Release-readiness mode additionally requires the repository-root icon.png.
 pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -ReleaseReadiness
-dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config
+pwsh -NoProfile -File scripts/Invoke-VulnerabilityAudit.ps1
 ```
 
 The package-gate PNG regression control can be run without building a package:
@@ -32,7 +36,7 @@ pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -PngValidationSelfTest
 
 It checks dimensions that exceed a byte and confirms that non-512x512 and oversized inputs fail closed.
 
-The package gate builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. Ordinary development mode permits the repository-root icon to be absent. Release-readiness mode fails closed when that icon is absent or invalid.
+The package gate restores the solution, runs the same fail-closed direct-and-transitive vulnerability audit used by release verification, builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. The audit runs `dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config` and fails on a vulnerable package, an advisory-service error, a command failure, or an incomplete report. Ordinary development mode permits the repository-root icon to be absent. Release-readiness mode fails closed when that icon is absent or invalid.
 
 ## Release validation before tag creation
 

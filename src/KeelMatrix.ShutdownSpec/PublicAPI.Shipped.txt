@@ -72,6 +72,7 @@ KeelMatrix.ShutdownSpec.ShutdownResult.Outcome.get -> KeelMatrix.ShutdownSpec.Sh
 KeelMatrix.ShutdownSpec.ShutdownResult.PrimaryOutcome.get -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownResult.PrimaryPhase.get -> KeelMatrix.ShutdownSpec.ShutdownPhase
 KeelMatrix.ShutdownSpec.ShutdownResult.Phase.get -> KeelMatrix.ShutdownSpec.ShutdownPhase
+KeelMatrix.ShutdownSpec.ShutdownResult.ReadinessObserved.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.ShouldCompleteWithoutFault() -> void
 KeelMatrix.ShutdownSpec.ShutdownResult.ShouldObserve(KeelMatrix.ShutdownSpec.ShutdownProbe! probe) -> void
 KeelMatrix.ShutdownSpec.ShutdownResult.ShouldStopWithin(System.TimeSpan deadline) -> void

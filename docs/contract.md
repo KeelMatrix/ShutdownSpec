@@ -20,6 +20,8 @@ The caller cancellation token and the harness outer deadline control the harness
 
 `WithStartupDeadline` and `WithShutdownDeadline` bound lifecycle phases. `WithHarnessDeadline` is the outer safety boundary. A default test deadline is not a production host shutdown timeout.
 
+The defaults are 5 seconds for startup, 5 seconds for graceful shutdown, 15 seconds for the complete harness, and 1 second for bounded cleanup.
+
 ## Outcomes
 
 | Outcome | Meaning |
@@ -38,20 +40,21 @@ The caller cancellation token and the harness outer deadline control the harness
 | `FactoryNoncompletion` | The service factory did not return before the outer harness deadline. |
 | `StartupNoncompletion` | `StartAsync` or the readiness probe did not complete before the startup phase deadline. |
 | `CleanupNoncompletion` | Disposal did not return before the cleanup deadline; this is never a successful result. |
+| `ExecutionCancellationUnverified` | The observed execution task canceled after stop began, but no independently observed application stopping-token checkpoint proved that the cancellation came from the expected shutdown path. |
 
-An unexpected fault or cancellation from an unrelated source never becomes a clean result. A cancellation already present before graceful stop is classified as an execution fault; cancellation observed after stop begins is classified as expected cancellation when the execution task completes within the bounded observation. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop or post-stop observation that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
+An unexpected fault or cancellation from an unrelated source never becomes a clean result. A cancellation already present before graceful stop is classified as an execution fault; cancellation observed after stop begins is classified as expected cancellation only when an independently configured stopping-token probe was observed and the execution-entry checkpoint was observed. Otherwise the result is `ExecutionCancellationUnverified` or `ExecutionNotStarted`. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop or post-stop observation that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
 
 ## Application-owned probes
 
 ShutdownSpec cannot infer that a queue, database, or broker is drained. Create a `ShutdownProbe`, mark it from application-owned code, register it with `WithProbe`, and assert it with `ShouldObserve`. Register a readiness probe with `WithReadinessProbe` when the service must reach a known ready state before shutdown begins. A stopping-token probe can be marked from the service's own stopping-token registration.
 
-Probe state is reset at the beginning of every `RunAsync` call, so a reusable harness cannot satisfy a later readiness or observation assertion from an earlier run.
+Probe state is reset at the beginning of every `RunAsync` call, so a reusable harness cannot satisfy a later readiness or observation assertion from an earlier run. Use `WithExecutionProbe` for an independently marked execution-entry checkpoint and `WithStoppingProbe` for a probe registered with the service's stopping token.
 
 Probe names are bounded and only their observed names are included in the default diagnostic report. Probe payloads are never transmitted or logged by the library.
 
 ## Diagnostics
 
-`ShutdownResult.ToDiagnosticString()` reports a stable failure code, phase, elapsed startup/shutdown/cleanup durations, startup/stop/execution state, host-token and harness-deadline facts, and observed probe names. It reports exception type names but does not append arbitrary exception messages or stacks by default.
+`ShutdownResult.ToDiagnosticString()` reports a stable failure code, phase, elapsed startup/shutdown/cleanup durations, startup/stop/execution state, host-token and harness-deadline facts, primary and cleanup outcomes, cancellation-notification state, and observed probe names. It reports exception type names but does not append arbitrary exception messages or stacks by default. `PrimaryOutcome` and `PrimaryPhase` remain available when bounded cleanup reports a separate failure through `CleanupOutcome`.
 
 The primary failure codes are:
 
@@ -66,6 +69,7 @@ The primary failure codes are:
 - `KMSHUT107` factory noncompletion
 - `KMSHUT108` startup noncompletion
 - `KMSHUT109` cleanup noncompletion
+- `KMSHUT110` execution cancellation without verified shutdown provenance
 
 ## In-process limitation
 

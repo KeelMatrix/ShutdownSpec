@@ -55,3 +55,7 @@ The shipping project references `Microsoft.CodeAnalysis.PublicApiAnalyzers` unco
 ## Package smoke
 
 The smoke project deliberately has no project reference to the library. It runs the documented `BackgroundService` quick start plus packed-artifact controls for an ignored-cancellation service, an early-returning stop with a still-running execution task, delayed completion, delayed fault, and delayed cancellation.
+
+## Stress and compatibility
+
+The bounded several-thousand-iteration fixture is documented in [stress-and-compatibility.md](stress-and-compatibility.md). The `net8.0` command uses the repository SDK; the `net10.0` comparison uses the nested `tests/Stress/global.json` and the targeted current hosting/runtime surface.

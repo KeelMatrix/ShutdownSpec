@@ -43,7 +43,10 @@ public enum ShutdownOutcome
     StartupNoncompletion,
 
     /// <summary>Bounded cleanup did not return before its cleanup deadline.</summary>
-    CleanupNoncompletion
+    CleanupNoncompletion,
+
+    /// <summary>The execution task canceled without independently observed shutdown-token evidence.</summary>
+    ExecutionCancellationUnverified
 }
 
 /// <summary>Identifies the lifecycle phase reached when a scenario finished.</summary>

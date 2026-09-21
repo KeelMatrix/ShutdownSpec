@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: pwsh -NoProfile -File scripts/Invoke-VulnerabilityAudit.ps1
 
-      - name: Pack exact release artifacts
+      - name: Run exact release package gate
         shell: pwsh
         run: |
           $tag = $env:RELEASE_TAG
@@ -49,25 +49,7 @@ jobs:
           if (-not $tagMatch.Success) { throw "Release tag is not a stable vX.Y.Z tag: $tag" }
 
           $version = $tagMatch.Groups['version'].Value
-          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts/release'
-          if (Test-Path -LiteralPath $artifactRoot) {
-              Remove-Item -LiteralPath $artifactRoot -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $artifactRoot | Out-Null
-
-          dotnet pack src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj --configuration Release --no-restore --output $artifactRoot
-          if ($LASTEXITCODE -ne 0) { throw "dotnet pack failed with exit code $LASTEXITCODE." }
-
-          $expected = @(
-              "KeelMatrix.ShutdownSpec.$version.nupkg",
-              "KeelMatrix.ShutdownSpec.$version.snupkg"
-          ) | Sort-Object
-          $actual = @(Get-ChildItem -LiteralPath $artifactRoot -File | ForEach-Object Name | Sort-Object)
-          $difference = Compare-Object -ReferenceObject $expected -DifferenceObject $actual
-          if ($null -ne $difference) {
-              throw "Release artifact set mismatch. Expected: $($expected -join ', '); actual: $($actual -join ', ')."
-          }
-          Write-Host "Exact release artifact set: $($actual -join ', ')"
+          pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -Configuration Release -ReleaseReadiness -ArtifactRoot (Join-Path $env:GITHUB_WORKSPACE 'artifacts/release') -Version $version
 
       - name: Upload verified artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -130,7 +112,8 @@ jobs:
               throw "Downloaded artifact set mismatch. Expected: $($expected -join ', '); actual: $($actual -join ', ')."
           }
 
-          foreach ($artifactName in $expected) {
-              dotnet nuget push (Join-Path $artifactRoot $artifactName) --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
-              if ($LASTEXITCODE -ne 0) { throw "NuGet push failed for $artifactName with exit code $LASTEXITCODE." }
-          }
+          $primaryPackage = Join-Path $artifactRoot "KeelMatrix.ShutdownSpec.$version.nupkg"
+          if (-not (Test-Path -LiteralPath $primaryPackage -PathType Leaf)) { throw "Primary package is missing: $primaryPackage" }
+          # The primary package push submits its matching snupkg automatically.
+          dotnet nuget push $primaryPackage --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw "NuGet push failed for $primaryPackage with exit code $LASTEXITCODE." }

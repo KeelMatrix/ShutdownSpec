@@ -1,0 +1,13 @@
+<Project>
+  <Target Name="ValidateShippingPackInputs" BeforeTargets="Pack" Condition="'$(IsShippingProject)' == 'true'">
+    <ItemGroup>
+      <_SensitivePackedItem Include="@(None)" Condition="'%(None.Pack)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch('%(None.Identity)', '(?i)(^|[\\/])(?:.*\.env(?:\..*)?|.*\.(?:pfx|snk|key)|AGENTS\.md|.*(?:secret|credential).*)$'))" />
+      <_SensitivePackedItem Include="@(Content)" Condition="'%(Content.Pack)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch('%(Content.Identity)', '(?i)(^|[\\/])(?:.*\.env(?:\..*)?|.*\.(?:pfx|snk|key)|AGENTS\.md|.*(?:secret|credential).*)$'))" />
+      <_UnexpectedPackedItem Include="@(None)" Condition="'%(None.Pack)' == 'true' and ('%(None.Identity)' != 'README.md' or '%(None.PackagePath)' != 'README.md') and ('%(None.Identity)' != '../../LICENSE' or '%(None.PackagePath)' != '') and ('%(None.Identity)' != '../../icon.png' or '%(None.PackagePath)' != 'icon.png')" />
+      <_UnexpectedPackedItem Include="@(Content)" Condition="'%(Content.Pack)' == 'true' and ('%(Content.Identity)' != 'README.md' or '%(Content.PackagePath)' != 'README.md') and ('%(Content.Identity)' != '../../LICENSE' or '%(Content.PackagePath)' != '') and ('%(Content.Identity)' != '../../icon.png' or '%(Content.PackagePath)' != 'icon.png')" />
+    </ItemGroup>
+    <Error Condition="'@(_SensitivePackedItem)' != ''" Text="Sensitive filename cannot be packed: @(_SensitivePackedItem)" />
+    <Error Condition="'@(_UnexpectedPackedItem)' != ''" Text="Unexpected pack input cannot be packed: @(_UnexpectedPackedItem)" />
+    <Error Condition="'$(PackageIcon)' != 'icon.png' or !Exists('$(MSBuildProjectDirectory)/../../icon.png')" Text="Shipping package requires the repository-root icon.png." />
+  </Target>
+</Project>

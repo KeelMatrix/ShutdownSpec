@@ -42,8 +42,19 @@ if (earlyReturn.Outcome != ShutdownOutcome.ServiceNoncompletion
     throw new InvalidOperationException($"Unexpected early-return classification: {earlyReturn.ToDiagnosticString()}");
 }
 
+try
+{
+    earlyReturn.ShouldStopWithin(TimeSpan.FromSeconds(1));
+    throw new InvalidOperationException("ShouldStopWithin accepted an unfinished execution task.");
+}
+catch (ShutdownAssertionException)
+{
+}
+
+var delayedEntry = new ShutdownProbe("execution-entered");
 var delayedCompletion = await ShutdownHarness
-    .For(() => new DelayedExecutionCompletionService())
+    .For(() => new DelayedExecutionCompletionService(delayedEntry))
+    .WithExecutionProbe(delayedEntry)
     .WithShutdownDeadline(TimeSpan.FromSeconds(1))
     .WithHarnessDeadline(TimeSpan.FromSeconds(2))
     .RunAsync();
@@ -64,8 +75,13 @@ if (delayedFault.Outcome != ShutdownOutcome.ExecutionFault || delayedFault.Succe
     throw new InvalidOperationException($"Unexpected delayed-fault classification: {delayedFault.ToDiagnosticString()}");
 }
 
+var delayedEntryCancellation = new ShutdownProbe("execution-entered");
+var delayedStoppingCancellation = new ShutdownProbe("stopping-token");
 var delayedCancellation = await ShutdownHarness
-    .For(() => new DelayedExecutionCancellationService())
+    .For(() => new DelayedExecutionCancellationService(delayedEntryCancellation, delayedStoppingCancellation))
+    .WithExecutionProbe(delayedEntryCancellation)
+    .WithStoppingProbe(delayedStoppingCancellation)
+    .WithProbe(delayedStoppingCancellation)
     .WithShutdownDeadline(TimeSpan.FromSeconds(1))
     .WithHarnessDeadline(TimeSpan.FromSeconds(2))
     .RunAsync();
@@ -108,6 +124,9 @@ sealed class EarlyReturningRunningService : BackgroundService
 sealed class DelayedExecutionCompletionService : BackgroundService
 {
     private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ShutdownProbe _entry;
+
+    public DelayedExecutionCompletionService(ShutdownProbe entry) => _entry = entry;
 
     public override Task StopAsync(CancellationToken cancellationToken)
     {
@@ -115,7 +134,11 @@ sealed class DelayedExecutionCompletionService : BackgroundService
         return Task.CompletedTask;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) => _completion.Task;
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _entry.MarkObserved();
+        return _completion.Task;
+    }
 
     private async Task CompleteLaterAsync()
     {
@@ -145,13 +168,27 @@ sealed class DelayedExecutionFaultService : BackgroundService
 
 sealed class DelayedExecutionCancellationService : BackgroundService
 {
+    private readonly ShutdownProbe _entry;
+    private readonly ShutdownProbe _stopping;
+
+    public DelayedExecutionCancellationService(ShutdownProbe entry, ShutdownProbe stopping)
+    {
+        _entry = entry;
+        _stopping = stopping;
+    }
+
     public override Task StopAsync(CancellationToken cancellationToken)
     {
         _ = StopThroughBaseLaterAsync(cancellationToken);
         return Task.CompletedTask;
     }
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _entry.MarkObserved();
+        _ = _stopping.ObserveCancellation(stoppingToken);
+        return Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+    }
 
     private async Task StopThroughBaseLaterAsync(CancellationToken cancellationToken)
     {

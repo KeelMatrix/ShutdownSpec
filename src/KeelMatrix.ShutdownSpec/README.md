@@ -39,6 +39,8 @@ sealed class Worker : BackgroundService
 
 The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
+Use `WithExecutionProbe` for an application-owned checkpoint marked from the execution body. When testing expected cancellation, use `WithStoppingProbe` with a `ShutdownProbe` registered through `ObserveCancellation`; cancellation without those independent observations is reported conservatively.
+
 After `StopAsync` returns, an observable `BackgroundService.ExecuteTask` is still awaited within the remaining configured bounds. A task that remains running is reported as `ServiceNoncompletion`; completion, fault, and cancellation are classified from the final observed task state.
 
 Representative failure output for a worker that ignores cancellation:
@@ -56,7 +58,9 @@ Cleanup completed: True; cleanup timed out: False
 
 Create a `ShutdownProbe` in the test and mark it from application-owned code. Register it with `WithProbe` and assert it with `ShouldObserve`. Use `WithReadinessProbe` when shutdown must not begin until a readiness checkpoint has been observed.
 
-`WithStartupDeadline`, `WithShutdownDeadline`, and `WithHarnessDeadline` are separate. The host shutdown token passed to `StartAsync`/`StopAsync`, the `BackgroundService` stopping token, the caller cancellation token, and the harness's outer safety deadline are recorded separately. A test deadline does not set or predict a production host timeout.
+`WithStartupDeadline`, `WithShutdownDeadline`, and `WithHarnessDeadline` are separate. The startup token passed to `StartAsync`, the host shutdown token passed to `StopAsync`, the `BackgroundService` stopping token, the caller cancellation token, and the harness's outer safety deadline are recorded separately. A test deadline does not set or predict a production host timeout.
+
+The default test bounds are 5 seconds for startup, 5 seconds for shutdown, 15 seconds for the complete harness, and 1 second for cleanup. Use `WithExecutionProbe` and `WithStoppingProbe` when a cancellation result must be proven by independent application-owned checkpoints.
 
 The package targets `net8.0` and `netstandard2.0` and is validated against `Microsoft.Extensions.Hosting` 10.0.12. The repository's public CI matrix validates it on Windows, Linux, and macOS. See the [canonical supported-platform statement](https://github.com/KeelMatrix/ShutdownSpec/blob/main/docs/contract.md#supported-platforms-and-dependency-boundary) for the full compatibility boundary. The package makes no network requests.
 

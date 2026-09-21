@@ -3,7 +3,9 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [switch]$ReleaseReadiness,
-    [switch]$PngValidationSelfTest
+    [switch]$PngValidationSelfTest,
+    [string]$ArtifactRoot,
+    [string]$Version = '0.1.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,19 +22,28 @@ $smokeProject = Join-Path $repoRoot 'tests/PackageSmoke/PackageSmoke.csproj'
 $auditScript = Join-Path $repoRoot 'scripts/Invoke-VulnerabilityAudit.ps1'
 $feedRoot = Join-Path $gateRoot 'feed'
 $packagesRoot = Join-Path $gateRoot 'packages'
-$artifactRoot = Join-Path $gateRoot 'artifacts'
+$artifactRoot = if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) { Join-Path $gateRoot 'artifacts' } else { [IO.Path]::GetFullPath($ArtifactRoot) }
 $iconPath = Join-Path $repoRoot 'icon.png'
 $packageId = 'KeelMatrix.ShutdownSpec'
-$version = '0.1.0'
+$version = $Version
 $nupkgName = "$packageId.$version.nupkg"
 $snupkgName = "$packageId.$version.snupkg"
+$sensitivePackageEntryPattern = '(?i)(^|/)(?:.*\.env(?:\..*)?|.*\.(?:pfx|snk|key)|AGENTS\.md|.*(?:secret|credential).*)$'
 
 if ($ReleaseReadiness -and -not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
     throw "Release-readiness package gate requires the repository-root icon.png."
 }
 
+if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must be a stable semantic version: $version" }
+if (-not $artifactRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Package artifacts must stay inside the repository: $artifactRoot"
+}
+
 if (Test-Path -LiteralPath $gateRoot) {
     Remove-Item -LiteralPath $gateRoot -Recurse -Force
+}
+if (([IO.Path]::GetFullPath($artifactRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar) -ne ([IO.Path]::GetFullPath($gateRoot)).TrimEnd([IO.Path]::DirectorySeparatorChar)) {
+    if (Test-Path -LiteralPath $artifactRoot) { Remove-Item -LiteralPath $artifactRoot -Recurse -Force }
 }
 New-Item -ItemType Directory -Path $feedRoot, $packagesRoot, $artifactRoot | Out-Null
 
@@ -61,6 +72,9 @@ function Assert-ZipEntries {
         if ($names -notcontains $required) { throw "Missing package entry: $required" }
     }
     foreach ($name in $names) {
+        if ($name -match $sensitivePackageEntryPattern) {
+            throw "Sensitive package entry rejected: $name"
+        }
         if (-not ($AllowedPatterns | Where-Object { $name -match $_ })) {
             throw "Unexpected package entry: $name"
         }
@@ -134,7 +148,33 @@ function Invoke-PngValidationSelfTest {
         if ($_.Exception.Message -ne 'Icon exceeds the 200 KB limit.') { throw }
     }
 
-    Write-Host 'PNG validation self-test passed: 256x256 and 1024x1024 parse correctly; non-512x512 and oversized inputs fail closed.'
+    foreach ($sensitiveName in @('settings.env', 'private.pfx', 'signing.snk', 'private.key', 'AGENTS.md', 'client-secret.json', 'service-credential.json')) {
+        if ($sensitiveName -notmatch $sensitivePackageEntryPattern) { throw "Packaging boundary self-test missed sensitive filename '$sensitiveName'." }
+    }
+    foreach ($safeName in @('README.md', 'LICENSE', 'icon.png', 'lib/net8.0/KeelMatrix.ShutdownSpec.dll')) {
+        if ($safeName -match $sensitivePackageEntryPattern) { throw "Packaging boundary self-test rejected safe filename '$safeName'." }
+    }
+    $shippingProjectText = Get-Content -LiteralPath $project -Raw
+    $packTargetsText = Get-Content -LiteralPath (Join-Path $repoRoot 'Directory.Build.targets') -Raw
+    if ($shippingProjectText -match 'PackageIcon\s+Condition=') { throw 'Packaging boundary self-test found a conditional package icon.' }
+    if ($packTargetsText -notmatch 'Sensitive filename cannot be packed') { throw 'Packaging boundary self-test found no MSBuild sensitive-file rejection.' }
+    if ($packTargetsText -notmatch 'Unexpected pack input cannot be packed') { throw 'Packaging boundary self-test found no MSBuild pack-input allowlist rejection.' }
+    foreach ($allowlistedInput in @(
+            @{ Identity = 'README.md'; PackagePath = 'README.md' },
+            @{ Identity = '../../LICENSE'; PackagePath = '' },
+            @{ Identity = '../../icon.png'; PackagePath = 'icon.png' })) {
+        $allowlistCondition = [regex]::Escape("('%(None.Identity)' != '$($allowlistedInput.Identity)' or '%(None.PackagePath)' != '$($allowlistedInput.PackagePath)')")
+        $contentAllowlistCondition = [regex]::Escape("('%(Content.Identity)' != '$($allowlistedInput.Identity)' or '%(Content.PackagePath)' != '$($allowlistedInput.PackagePath)')")
+        if ($packTargetsText -notmatch $allowlistCondition -or $packTargetsText -notmatch $contentAllowlistCondition) {
+            throw "Packaging boundary self-test found no allowlist entry for '$($allowlistedInput.Identity)' -> '$($allowlistedInput.PackagePath)'."
+        }
+    }
+    $unexpectedInput = @{ Identity = 'unexpected.txt'; PackagePath = 'unexpected.txt' }
+    if ($unexpectedInput.Identity -in @('README.md', '../../LICENSE', '../../icon.png')) {
+        throw 'Packaging boundary self-test accepted an unexpected pack input.'
+    }
+
+    Write-Host 'PNG and packaging-boundary self-test passed: invalid icons and sensitive filenames fail closed.'
 }
 
 if ($PngValidationSelfTest) {
@@ -177,6 +217,15 @@ try {
     if ($metadata.repository.type -ne 'git' -or $metadata.repository.url -ne 'https://github.com/KeelMatrix/ShutdownSpec') { throw 'Repository metadata is incorrect.' }
     $dependencyGroups = @($metadata.dependencies.group | ForEach-Object targetFramework | Sort-Object)
     if (Compare-Object -ReferenceObject @('.NETStandard2.0', 'net8.0') -DifferenceObject $dependencyGroups) { throw 'Package dependency target frameworks are incorrect.' }
+    foreach ($group in @($metadata.dependencies.group)) {
+        $dependencies = @($group.dependency)
+        if ($dependencies.Count -ne 1) { throw "Dependency group '$($group.targetFramework)' must contain exactly one runtime dependency." }
+        $dependency = $dependencies[0]
+        if ($dependency.id -ne 'Microsoft.Extensions.Hosting') { throw "Unexpected dependency id '$($dependency.id)'." }
+        if ($dependency.version -notmatch '^(?:10\.0\.12|\[10\.0\.12\]|\[10\.0\.12,\s*10\.0\.13\))$') {
+            throw "Dependency '$($dependency.id)' has an unsafe or unexpected version range '$($dependency.version)'."
+        }
+    }
 
     $iconMetadata = $metadata.icon
     if ($ReleaseReadiness -or (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
@@ -212,5 +261,18 @@ Copy-Item -LiteralPath $nupkgPath -Destination $feedRoot
 $smokeConfig = Join-Path $repoRoot 'tests/PackageSmoke/NuGet.config'
 Invoke-Checked 'dotnet' @('restore', $smokeProject, '--configfile', $smokeConfig, '--packages', $packagesRoot)
 Invoke-Checked 'dotnet' @('run', '--project', $smokeProject, '--configuration', $Configuration, '--no-restore')
+
+$netstandardProject = Join-Path $repoRoot 'tests/PackageSmokeNetStandard/PackageSmokeNetStandard.csproj'
+$netstandardConfig = Join-Path $repoRoot 'tests/PackageSmokeNetStandard/NuGet.config'
+Invoke-Checked 'dotnet' @('restore', $netstandardProject, '--configfile', $netstandardConfig, '--packages', $packagesRoot)
+Invoke-Checked 'dotnet' @('build', $netstandardProject, '--configuration', $Configuration, '--no-restore', '--nologo')
+$assetsPath = Join-Path $repoRoot 'tests/PackageSmokeNetStandard/obj/project.assets.json'
+$assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json
+$netstandardTarget = $assets.targets.PSObject.Properties | Where-Object Name -eq '.NETStandard,Version=v2.0' | Select-Object -ExpandProperty Value
+$packageLibrary = $netstandardTarget."$packageId/$version"
+if ($null -eq $packageLibrary -or $null -eq $packageLibrary.compile.PSObject.Properties['lib/netstandard2.0/KeelMatrix.ShutdownSpec.dll']) {
+    throw 'The isolated netstandard2.0 consumer did not select the shipped netstandard2.0 library asset.'
+}
+Write-Host 'Isolated netstandard2.0 consumer passed: lib/netstandard2.0/KeelMatrix.ShutdownSpec.dll selected.'
 
 Write-Host "Package gate passed: $nupkgName, $snupkgName"

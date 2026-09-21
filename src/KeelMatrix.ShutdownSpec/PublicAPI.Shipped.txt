@@ -9,12 +9,14 @@ KeelMatrix.ShutdownSpec.ShutdownExecutionState.Running = 1 -> KeelMatrix.Shutdow
 KeelMatrix.ShutdownSpec.ShutdownHarness
 KeelMatrix.ShutdownSpec.ShutdownHarness.RunAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<KeelMatrix.ShutdownSpec.ShutdownResult!>!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithCleanupDeadline(System.TimeSpan deadline) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
+KeelMatrix.ShutdownSpec.ShutdownHarness.WithExecutionProbe(KeelMatrix.ShutdownSpec.ShutdownProbe! probe) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithHarnessDeadline(System.TimeSpan deadline) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithHost(System.Func<Microsoft.Extensions.Hosting.IHostBuilder!>! hostBuilderFactory) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithProbe(KeelMatrix.ShutdownSpec.ShutdownProbe! probe) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithReadinessProbe(KeelMatrix.ShutdownSpec.ShutdownProbe! probe) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithShutdownDeadline(System.TimeSpan deadline) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownHarness.WithStartupDeadline(System.TimeSpan deadline) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
+KeelMatrix.ShutdownSpec.ShutdownHarness.WithStoppingProbe(KeelMatrix.ShutdownSpec.ShutdownProbe! probe) -> KeelMatrix.ShutdownSpec.ShutdownHarness!
 KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.CallerCancellation = 7 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.CleanCompletion = 0 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
@@ -30,6 +32,7 @@ KeelMatrix.ShutdownSpec.ShutdownOutcome.ServiceNoncompletion = 8 -> KeelMatrix.S
 KeelMatrix.ShutdownSpec.ShutdownOutcome.StartupNoncompletion = 12 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.StartupFailure = 3 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.StopFault = 4 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownOutcome.ExecutionCancellationUnverified = 14 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownPhase
 KeelMatrix.ShutdownSpec.ShutdownPhase.CleaningUp = 5 -> KeelMatrix.ShutdownSpec.ShutdownPhase
 KeelMatrix.ShutdownSpec.ShutdownPhase.Completed = 6 -> KeelMatrix.ShutdownSpec.ShutdownPhase
@@ -47,8 +50,13 @@ KeelMatrix.ShutdownSpec.ShutdownProbe.ShutdownProbe(string! name) -> void
 KeelMatrix.ShutdownSpec.ShutdownResult
 KeelMatrix.ShutdownSpec.ShutdownResult.CallerCancellationRequested.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.CleanupCompleted.get -> bool
+KeelMatrix.ShutdownSpec.ShutdownResult.CleanupExceptionMessage.get -> string?
+KeelMatrix.ShutdownSpec.ShutdownResult.CleanupExceptionTypeName.get -> string?
+KeelMatrix.ShutdownSpec.ShutdownResult.CleanupOutcome.get -> KeelMatrix.ShutdownSpec.ShutdownOutcome?
 KeelMatrix.ShutdownSpec.ShutdownResult.CleanupDuration.get -> System.TimeSpan
 KeelMatrix.ShutdownSpec.ShutdownResult.CleanupTimedOut.get -> bool
+KeelMatrix.ShutdownSpec.ShutdownResult.CancellationNotificationFaulted.get -> bool
+KeelMatrix.ShutdownSpec.ShutdownResult.CancellationNotificationPending.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.Elapsed.get -> System.TimeSpan
 KeelMatrix.ShutdownSpec.ShutdownResult.ExceptionMessage.get -> string?
 KeelMatrix.ShutdownSpec.ShutdownResult.ExceptionTypeName.get -> string?
@@ -61,6 +69,8 @@ KeelMatrix.ShutdownSpec.ShutdownResult.HasUnexpectedFault.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.HostShutdownCancellationRequested.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.ObservedProbeNames.get -> System.Collections.Generic.IReadOnlyList<string!>!
 KeelMatrix.ShutdownSpec.ShutdownResult.Outcome.get -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownResult.PrimaryOutcome.get -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownResult.PrimaryPhase.get -> KeelMatrix.ShutdownSpec.ShutdownPhase
 KeelMatrix.ShutdownSpec.ShutdownResult.Phase.get -> KeelMatrix.ShutdownSpec.ShutdownPhase
 KeelMatrix.ShutdownSpec.ShutdownResult.ShouldCompleteWithoutFault() -> void
 KeelMatrix.ShutdownSpec.ShutdownResult.ShouldObserve(KeelMatrix.ShutdownSpec.ShutdownProbe! probe) -> void
@@ -68,8 +78,10 @@ KeelMatrix.ShutdownSpec.ShutdownResult.ShouldStopWithin(System.TimeSpan deadline
 KeelMatrix.ShutdownSpec.ShutdownResult.ShutdownDeadlineFired.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.ShutdownDuration.get -> System.TimeSpan
 KeelMatrix.ShutdownSpec.ShutdownResult.StartupCompleted.get -> bool
+KeelMatrix.ShutdownSpec.ShutdownResult.StartupCancellationRequested.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.StartupDeadlineFired.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.StartupDuration.get -> System.TimeSpan
+KeelMatrix.ShutdownSpec.ShutdownResult.StoppingTokenObserved.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.StopCompleted.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.StopInitiated.get -> bool
 KeelMatrix.ShutdownSpec.ShutdownResult.Succeeded.get -> bool

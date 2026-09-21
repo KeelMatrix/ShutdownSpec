@@ -10,7 +10,7 @@
     <PackageTags>dotnet;testing;backgroundservice;ihostedservice;hosted-service;graceful-shutdown;cancellation;worker-service</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
-    <PackageIcon Condition="Exists('$(MSBuildProjectDirectory)/../../icon.png')">icon.png</PackageIcon>
+    <PackageIcon>icon.png</PackageIcon>
     <Copyright>Copyright (c) 2026 KeelMatrix</Copyright>
     <Authors>KeelMatrix</Authors>
     <RepositoryUrl>https://github.com/KeelMatrix/ShutdownSpec</RepositoryUrl>
@@ -26,7 +26,7 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="README.md" Visible="false" />
     <None Include="../../LICENSE" Pack="true" PackagePath="" Visible="false" />
-    <None Include="../../icon.png" Pack="true" PackagePath="icon.png" Visible="false" Condition="Exists('$(MSBuildProjectDirectory)/../../icon.png')" Link="icon.png" />
+    <None Include="../../icon.png" Pack="true" PackagePath="icon.png" Visible="false" Link="icon.png" />
   </ItemGroup>
 
   <ItemGroup>

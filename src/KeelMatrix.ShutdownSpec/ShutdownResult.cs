@@ -22,13 +22,22 @@ public sealed class ShutdownResult
         bool executionCompleted,
         bool executionCanceled,
         bool harnessDeadlineFired,
+        bool startupCancellationRequested,
         bool startupDeadlineFired,
         bool shutdownDeadlineFired,
         bool callerCancellationRequested,
         bool hostShutdownCancellationRequested,
+        bool stoppingTokenObserved,
+        bool cancellationNotificationFaulted,
+        bool cancellationNotificationPending,
         ShutdownExecutionState executionState,
         string? exceptionTypeName,
         string? exceptionMessage,
+        ShutdownOutcome primaryOutcome,
+        ShutdownPhase primaryPhase,
+        ShutdownOutcome? cleanupOutcome,
+        string? cleanupExceptionTypeName,
+        string? cleanupExceptionMessage,
         bool cleanupCompleted,
         bool cleanupTimedOut,
         IEnumerable<ShutdownProbe> observedProbes)
@@ -46,13 +55,22 @@ public sealed class ShutdownResult
         ExecutionCompleted = executionCompleted;
         ExecutionCanceled = executionCanceled;
         HarnessDeadlineFired = harnessDeadlineFired;
+        StartupCancellationRequested = startupCancellationRequested;
         StartupDeadlineFired = startupDeadlineFired;
         ShutdownDeadlineFired = shutdownDeadlineFired;
         CallerCancellationRequested = callerCancellationRequested;
         HostShutdownCancellationRequested = hostShutdownCancellationRequested;
+        StoppingTokenObserved = stoppingTokenObserved;
+        CancellationNotificationFaulted = cancellationNotificationFaulted;
+        CancellationNotificationPending = cancellationNotificationPending;
         ExecutionState = executionState;
         ExceptionTypeName = exceptionTypeName;
         ExceptionMessage = exceptionMessage;
+        PrimaryOutcome = primaryOutcome;
+        PrimaryPhase = primaryPhase;
+        CleanupOutcome = cleanupOutcome;
+        CleanupExceptionTypeName = cleanupExceptionTypeName;
+        CleanupExceptionMessage = cleanupExceptionMessage;
         CleanupCompleted = cleanupCompleted;
         CleanupTimedOut = cleanupTimedOut;
         _observedProbeReferences = new HashSet<ShutdownProbe>(observedProbes);
@@ -99,6 +117,9 @@ public sealed class ShutdownResult
     /// <summary>Gets whether the outer harness deadline fired.</summary>
     public bool HarnessDeadlineFired { get; }
 
+    /// <summary>Gets whether the startup cancellation notification was requested.</summary>
+    public bool StartupCancellationRequested { get; }
+
     /// <summary>Gets whether the startup phase deadline fired.</summary>
     public bool StartupDeadlineFired { get; }
 
@@ -111,6 +132,15 @@ public sealed class ShutdownResult
     /// <summary>Gets whether the token passed to graceful shutdown was requested.</summary>
     public bool HostShutdownCancellationRequested { get; }
 
+    /// <summary>Gets whether the configured application-owned stopping-token probe was observed before result classification.</summary>
+    public bool StoppingTokenObserved { get; }
+
+    /// <summary>Gets whether a cancellation callback failed while notification was isolated.</summary>
+    public bool CancellationNotificationFaulted { get; }
+
+    /// <summary>Gets whether an isolated cancellation notification was still running when the result was returned.</summary>
+    public bool CancellationNotificationPending { get; }
+
     /// <summary>Gets the latest observed execution-task state.</summary>
     public ShutdownExecutionState ExecutionState { get; }
 
@@ -119,6 +149,21 @@ public sealed class ShutdownResult
 
     /// <summary>Gets the captured exception message for explicit caller inspection.</summary>
     public string? ExceptionMessage { get; }
+
+    /// <summary>Gets the primary scenario outcome before cleanup ran.</summary>
+    public ShutdownOutcome PrimaryOutcome { get; }
+
+    /// <summary>Gets the phase where the primary scenario outcome was determined.</summary>
+    public ShutdownPhase PrimaryPhase { get; }
+
+    /// <summary>Gets a cleanup outcome, when cleanup failed independently of the primary scenario.</summary>
+    public ShutdownOutcome? CleanupOutcome { get; }
+
+    /// <summary>Gets the cleanup exception type without exposing it in the default report.</summary>
+    public string? CleanupExceptionTypeName { get; }
+
+    /// <summary>Gets the cleanup exception message for explicit caller inspection.</summary>
+    public string? CleanupExceptionMessage { get; }
 
     /// <summary>Gets whether cleanup completed before its own bound.</summary>
     public bool CleanupCompleted { get; }
@@ -130,16 +175,17 @@ public sealed class ShutdownResult
     public IReadOnlyList<string> ObservedProbeNames { get; }
 
     /// <summary>Gets whether the lifecycle and bounded cleanup both completed successfully.</summary>
-    public bool Succeeded => (Outcome == ShutdownOutcome.CleanCompletion || Outcome == ShutdownOutcome.ExpectedCancellation)
+    public bool Succeeded => (PrimaryOutcome == ShutdownOutcome.CleanCompletion || PrimaryOutcome == ShutdownOutcome.ExpectedCancellation)
         && CleanupCompleted
-        && !CleanupTimedOut;
+        && !CleanupTimedOut
+        && CleanupOutcome is null
+        && Outcome != ShutdownOutcome.ExecutionCancellationUnverified
+        && ExecutionState != ShutdownExecutionState.Running;
 
     /// <summary>Gets whether an unexpected fault was observed.</summary>
-    public bool HasUnexpectedFault => Outcome == ShutdownOutcome.FactoryFailure
-        || Outcome == ShutdownOutcome.StartupFailure
-        || Outcome == ShutdownOutcome.StopFault
-        || Outcome == ShutdownOutcome.ExecutionFault
-        || Outcome == ShutdownOutcome.CleanupFailure;
+    public bool HasUnexpectedFault => IsUnexpectedFault(PrimaryOutcome)
+        || IsUnexpectedFault(Outcome)
+        || (CleanupOutcome is not null && IsUnexpectedFault(CleanupOutcome.Value));
 
     /// <summary>Checks that graceful shutdown completed within a configured assertion bound.</summary>
     /// <param name="deadline">The maximum acceptable shutdown duration.</param>
@@ -147,7 +193,7 @@ public sealed class ShutdownResult
     public void ShouldStopWithin(TimeSpan deadline)
     {
         if (deadline < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(deadline));
-        if (!StopCompleted || ShutdownDuration > deadline)
+        if (!Succeeded || !StopCompleted || ShutdownDuration > deadline)
         {
             throw new ShutdownAssertionException($"Shutdown did not complete within {deadline.TotalSeconds:0.###}s.\n{ToDiagnosticString()}");
         }
@@ -184,12 +230,15 @@ public sealed class ShutdownResult
         builder.AppendLine();
         builder.Append("Phase: ").Append(Phase).AppendLine();
         builder.Append("Elapsed: ").Append(Elapsed.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms").AppendLine();
+        builder.Append("Startup duration: ").Append(StartupDuration.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms; shutdown duration: ").Append(ShutdownDuration.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms; cleanup duration: ").Append(CleanupDuration.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms").AppendLine();
         builder.Append("Startup completed: ").Append(StartupCompleted).Append("; stop initiated: ").Append(StopInitiated).Append("; stop completed: ").Append(StopCompleted).AppendLine();
         builder.Append("Execution: ").Append(ExecutionState).Append("; entered: ").Append(ExecutionEntered).Append("; completed: ").Append(ExecutionCompleted).Append("; canceled: ").Append(ExecutionCanceled).AppendLine();
-        builder.Append("Harness deadline: ").Append(HarnessDeadlineFired).Append("; startup deadline: ").Append(StartupDeadlineFired).Append("; shutdown deadline: ").Append(ShutdownDeadlineFired).AppendLine();
+        builder.Append("Harness deadline: ").Append(HarnessDeadlineFired).Append("; startup deadline: ").Append(StartupDeadlineFired).Append("; shutdown deadline: ").Append(ShutdownDeadlineFired).Append("; startup cancellation requested: ").Append(StartupCancellationRequested).AppendLine();
         builder.Append("Caller cancellation: ").Append(CallerCancellationRequested).Append("; host shutdown cancellation: ").Append(HostShutdownCancellationRequested).AppendLine();
+        builder.Append("Primary outcome: ").Append(PrimaryOutcome).Append("; cleanup outcome: ").Append(CleanupOutcome?.ToString() ?? "none").Append("; cancellation notification faulted: ").Append(CancellationNotificationFaulted).Append("; notification pending: ").Append(CancellationNotificationPending).AppendLine();
         builder.Append("Observed probes: ").Append(ObservedProbeNames.Count == 0 ? "none" : string.Join(", ", ObservedProbeNames)).AppendLine();
         if (ExceptionTypeName is not null) builder.Append("Exception type: ").Append(ExceptionTypeName).AppendLine();
+        if (CleanupExceptionTypeName is not null) builder.Append("Cleanup exception type: ").Append(CleanupExceptionTypeName).AppendLine();
         builder.Append("Cleanup completed: ").Append(CleanupCompleted).Append("; cleanup timed out: ").Append(CleanupTimedOut);
         return builder.ToString();
     }
@@ -213,7 +262,15 @@ public sealed class ShutdownResult
             case ShutdownOutcome.FactoryNoncompletion: return "KMSHUT107";
             case ShutdownOutcome.StartupNoncompletion: return "KMSHUT108";
             case ShutdownOutcome.CleanupNoncompletion: return "KMSHUT109";
+            case ShutdownOutcome.ExecutionCancellationUnverified: return "KMSHUT110";
             default: return "KMSHUT000";
         }
     }
+
+    private static bool IsUnexpectedFault(ShutdownOutcome outcome) => outcome == ShutdownOutcome.FactoryFailure
+        || outcome == ShutdownOutcome.StartupFailure
+        || outcome == ShutdownOutcome.StopFault
+        || outcome == ShutdownOutcome.ExecutionFault
+        || outcome == ShutdownOutcome.ExecutionCancellationUnverified
+        || outcome == ShutdownOutcome.CleanupFailure;
 }

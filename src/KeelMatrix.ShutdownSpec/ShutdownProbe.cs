@@ -6,6 +6,7 @@ namespace KeelMatrix.ShutdownSpec;
 public sealed class ShutdownProbe
 {
     private int _observed;
+    private int _cancellationObserved;
 
     /// <summary>Creates a named lifecycle checkpoint.</summary>
     /// <param name="name">A stable, non-empty diagnostic name of at most 100 characters.</param>
@@ -22,16 +23,27 @@ public sealed class ShutdownProbe
     /// <summary>Gets whether application code has marked this checkpoint as observed.</summary>
     public bool IsObserved => Volatile.Read(ref _observed) != 0;
 
+    internal bool IsCancellationObserved => Volatile.Read(ref _cancellationObserved) != 0;
+
     /// <summary>Marks this checkpoint as observed. Repeated calls are harmless.</summary>
     public void MarkObserved() => Interlocked.Exchange(ref _observed, 1);
 
-    internal void Reset() => Volatile.Write(ref _observed, 0);
+    internal void Reset()
+    {
+        Volatile.Write(ref _observed, 0);
+        Volatile.Write(ref _cancellationObserved, 0);
+    }
 
     /// <summary>Registers this checkpoint to be marked when a cancellation token is canceled.</summary>
     /// <param name="cancellationToken">The application-owned cancellation token to observe.</param>
     /// <returns>A registration that can be disposed by the caller.</returns>
     public IDisposable ObserveCancellation(CancellationToken cancellationToken)
     {
-        return cancellationToken.Register(MarkObserved);
+        return cancellationToken.Register(static state =>
+        {
+            var probe = (ShutdownProbe)state!;
+            Volatile.Write(ref probe._cancellationObserved, 1);
+            probe.MarkObserved();
+        }, this);
     }
 }

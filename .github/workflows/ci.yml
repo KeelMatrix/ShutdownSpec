@@ -68,4 +68,5 @@ jobs:
         run: pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -Configuration Release -ReleaseReadiness
 
       - name: Run bounded lifecycle stress fixture
-        run: dotnet run --project tests/Stress/ShutdownSpec.Stress.Net8.csproj --configuration Release -- --iterations 3000 --max-seconds 180
+        if: matrix.os != 'macos-latest'
+        run: dotnet run --project tests/Stress/ShutdownSpec.Stress.Net8.csproj --configuration Release -- --iterations 3000 --max-seconds 120

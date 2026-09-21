@@ -34,6 +34,16 @@ It checks dimensions that exceed a byte and confirms that non-512x512 and oversi
 
 The package gate builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. Ordinary development mode permits the repository-root icon to be absent. Release-readiness mode fails closed when that icon is absent or invalid.
 
+## Release validation before tag creation
+
+After the intended `CHANGELOG.md` entry has a final version and date, validate the exact tag contract before creating or pushing that tag:
+
+```powershell
+pwsh -NoProfile -File scripts/Validate-Release.ps1 -Tag v0.1.0 -FirstPublicRelease
+```
+
+The validator fails closed when the tag, changelog, package version, dependency versions, or README install commands disagree. It also rejects planned/unreleased entries, missing dates, and first-release entries that contain categories other than `Added` or remediation-history wording. The same command runs as the first gate in the tag-scoped release workflow.
+
 ## API baseline
 
 The shipping project references `Microsoft.CodeAnalysis.PublicApiAnalyzers` unconditionally. Every supported public entry is recorded in `src/KeelMatrix.ShutdownSpec/PublicAPI.Shipped.txt`; `PublicAPI.Unshipped.txt` is header-only after release preparation.

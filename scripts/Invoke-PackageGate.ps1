@@ -141,7 +141,9 @@ if ($PngValidationSelfTest) {
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-Invoke-Checked 'dotnet' @('pack', $project, '--configuration', $Configuration, '--output', $artifactRoot, '--configfile', (Join-Path $repoRoot 'NuGet.config'))
+$nugetConfig = Join-Path $repoRoot 'NuGet.config'
+Invoke-Checked 'dotnet' @('restore', $project, '--configfile', $nugetConfig)
+Invoke-Checked 'dotnet' @('pack', $project, '--configuration', $Configuration, '--no-restore', '--output', $artifactRoot, '--configfile', $nugetConfig)
 
 $artifactNames = @(Get-ChildItem -LiteralPath $artifactRoot -File | ForEach-Object Name | Sort-Object)
 $expectedArtifacts = @($nupkgName, $snupkgName) | Sort-Object

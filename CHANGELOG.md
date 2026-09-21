@@ -4,7 +4,7 @@ Changes to KeelMatrix.ShutdownSpec are documented here.
 
 ## [Unreleased]
 
-No unreleased changes have been recorded.
+- Fixed false `CleanCompletion` results when `StopAsync` returns before an observable `BackgroundService.ExecuteTask` completes. The harness now performs bounded post-stop observation and preserves truthful deadline provenance.
 
 ## [0.1.0] - Planned
 

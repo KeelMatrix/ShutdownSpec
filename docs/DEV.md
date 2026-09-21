@@ -40,4 +40,4 @@ The shipping project references `Microsoft.CodeAnalysis.PublicApiAnalyzers` unco
 
 ## Package smoke
 
-The smoke project deliberately has no project reference to the library. It runs the documented `BackgroundService` quick start and an ignored-cancellation scenario from the packed `.nupkg`, and checks that the latter is classified as service noncompletion rather than a false clean result.
+The smoke project deliberately has no project reference to the library. It runs the documented `BackgroundService` quick start plus packed-artifact controls for an ignored-cancellation service, an early-returning stop with a still-running execution task, delayed completion, delayed fault, and delayed cancellation.

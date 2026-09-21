@@ -39,6 +39,8 @@ sealed class Worker : BackgroundService
 
 The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
+After `StopAsync` returns, an observable `BackgroundService.ExecuteTask` is still awaited within the remaining configured bounds. A task that remains running is reported as `ServiceNoncompletion`; completion, fault, and cancellation are classified from the final observed task state.
+
 Representative failure output for a worker that ignores cancellation:
 
 ```text
@@ -60,7 +62,7 @@ The package targets `net8.0` and `netstandard2.0` and is validated against `Micr
 
 ## Limitations
 
-ShutdownSpec does not infer queue or database drain state, make network requests, collect telemetry, control processes, or replace the host. It cannot safely regain control from an arbitrary synchronous infinite loop in the same process; the bounded result reports a deadline or noncompletion outcome, and the blocked thread may remain.
+ShutdownSpec does not infer queue or database drain state, make network requests, collect telemetry, control processes, or replace the host. It can bound asynchronous operations, but it cannot safely regain control from an arbitrary synchronous infinite loop on the calling process's thread; the truthful result is returned while the blocked thread may remain.
 
 See the [canonical lifecycle contract](https://github.com/KeelMatrix/ShutdownSpec/blob/main/docs/contract.md) for outcome codes and failure diagnostics.
 
@@ -68,5 +70,5 @@ See the [canonical lifecycle contract](https://github.com/KeelMatrix/ShutdownSpe
 
 - `StartupNoncompletion` means `StartAsync` or the readiness probe exceeded the startup deadline. Check the readiness probe and startup path before increasing the deadline.
 - `FactoryNoncompletion` means the synchronous service factory did not return before the outer deadline. The harness bounds its wait, but it cannot interrupt a synchronous block in the same process.
-- `ServiceNoncompletion` means stop or execution did not finish before the applicable shutdown/outer deadline. Inspect the diagnostic report for the exact deadline provenance.
+- `ServiceNoncompletion` means stop or an observable execution task did not finish before the applicable shutdown/outer deadline. `StopCompleted` can be true when a custom `StopAsync` returns early; inspect the execution state and exact deadline provenance.
 - `CleanupNoncompletion` means disposal did not return before the cleanup deadline. Use process isolation when a hard interruption boundary is required.

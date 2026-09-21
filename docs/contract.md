@@ -9,7 +9,8 @@ This document defines the v1 result semantics for KeelMatrix.ShutdownSpec. The h
 3. The harness records readiness and application-owned probes when the consumer marks them.
 4. The harness starts graceful shutdown with a distinct host shutdown token.
 5. The harness observes the service and, for `BackgroundService`, its public execution task when available from the targeted hosting package.
-6. Bounded cleanup runs after failure, cancellation, or noncompletion.
+6. After `StopAsync` returns, a still-running observable execution task is awaited within the remaining shutdown and outer-harness bounds. A task that completes, faults, or cancels during that bounded observation is classified from its final state.
+7. Bounded cleanup runs after failure, cancellation, or noncompletion.
 
 The caller cancellation token and the harness outer deadline control the harness wait. They are not the host shutdown token, and neither is the `BackgroundService` stopping token passed by the hosting implementation to `ExecuteAsync`.
 
@@ -19,7 +20,7 @@ The caller cancellation token and the harness outer deadline control the harness
 
 | Outcome | Meaning |
 | --- | --- |
-| `CleanCompletion` | Startup and graceful shutdown completed without an unexpected fault or missed host deadline. |
+| `CleanCompletion` | Startup, graceful shutdown, and any bounded post-stop observation completed without an unexpected fault or missed deadline. |
 | `ExpectedCancellation` | The service completed through expected cancellation. |
 | `ExecutionNotStarted` | Immediate stop completed before a background execution body became observable. This is not a clean result. |
 | `StartupFailure` | `StartAsync` or host construction failed after factory creation. |
@@ -27,14 +28,14 @@ The caller cancellation token and the harness outer deadline control the harness
 | `ExecutionFault` | A public `BackgroundService.ExecuteTask` or an observed execution task faulted. |
 | `HarnessDeadline` | The outer harness deadline expired before the lifecycle could reach graceful shutdown. |
 | `CallerCancellation` | The caller cancellation token ended the harness wait. |
-| `ServiceNoncompletion` | The service was still incomplete at the shutdown or outer harness deadline. |
+| `ServiceNoncompletion` | The service or its observable execution task was still incomplete at the shutdown or outer harness deadline. `StopCompleted` may still be `true` when `ExecuteTask` remains running after an early-returning `StopAsync`. |
 | `CleanupFailure` | Bounded cleanup failed after the primary outcome; the primary outcome remains available in the result. |
 | `FactoryFailure` | The service factory failed before startup began. |
 | `FactoryNoncompletion` | The service factory did not return before the outer harness deadline. |
 | `StartupNoncompletion` | `StartAsync` or the readiness probe did not complete before the startup phase deadline. |
 | `CleanupNoncompletion` | Disposal did not return before the cleanup deadline; this is never a successful result. |
 
-An unexpected fault or cancellation from an unrelated source never becomes a clean result. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop wait that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
+An unexpected fault or cancellation from an unrelated source never becomes a clean result. A cancellation already present before graceful stop is classified as an execution fault; cancellation observed after stop begins is classified as expected cancellation when the execution task completes within the bounded observation. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop or post-stop observation that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
 
 ## Application-owned probes
 

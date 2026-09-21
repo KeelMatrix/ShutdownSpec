@@ -308,14 +308,38 @@ public sealed class ShutdownHarness
                         }
                     }
 
-                    RefreshExecutionState(executionTask ?? GetExecutionTask(service), ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
+                    executionTask ??= GetExecutionTask(service);
+                    RefreshExecutionState(executionTask, ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
                     if (outcome == ShutdownOutcome.CleanCompletion)
                     {
-                        if (executionState == ShutdownExecutionState.Faulted)
+                        if (executionState == ShutdownExecutionState.Running && executionTask is not null)
+                        {
+                            var remainingShutdown = _shutdownDeadline - shutdownClock.Elapsed;
+                            var executionWait = await WaitForOperationAsync(
+                                executionTask,
+                                remainingShutdown > TimeSpan.Zero ? remainingShutdown : TimeSpan.Zero,
+                                stopwatch,
+                                cancellationToken).ConfigureAwait(false);
+                            if (executionWait != WaitReason.Completed)
+                            {
+                                shutdownCancellation.Cancel();
+                                hostShutdownCancellationRequested = shutdownCancellation.IsCancellationRequested;
+                                shutdownDeadlineFired = executionWait == WaitReason.PhaseDeadline;
+                                harnessDeadlineFired = executionWait == WaitReason.HarnessDeadline;
+                                outcome = executionWait switch
+                                {
+                                    WaitReason.CallerCancellation => ShutdownOutcome.CallerCancellation,
+                                    _ => ShutdownOutcome.ServiceNoncompletion
+                                };
+                            }
+                        }
+
+                        RefreshExecutionState(executionTask, ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
+                        if (outcome == ShutdownOutcome.CleanCompletion && executionState == ShutdownExecutionState.Faulted)
                         {
                             outcome = ShutdownOutcome.ExecutionFault;
                         }
-                        else if (executionState == ShutdownExecutionState.Canceled)
+                        else if (outcome == ShutdownOutcome.CleanCompletion && executionState == ShutdownExecutionState.Canceled)
                         {
                             if (executionCanceledBeforeStop)
                             {
@@ -327,11 +351,12 @@ public sealed class ShutdownHarness
                                 outcome = executionEntered ? ShutdownOutcome.ExpectedCancellation : ShutdownOutcome.ExecutionNotStarted;
                             }
                         }
-                        else if (shutdownDeadlineFired && (!stopCompleted || executionState == ShutdownExecutionState.Running))
+                        else if (outcome == ShutdownOutcome.CleanCompletion && shutdownDeadlineFired && (!stopCompleted || executionState == ShutdownExecutionState.Running))
                         {
                             outcome = ShutdownOutcome.ServiceNoncompletion;
                         }
                     }
+                    shutdownDuration = shutdownClock.Elapsed;
                 }
             }
         }

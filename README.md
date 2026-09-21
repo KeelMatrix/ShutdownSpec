@@ -41,6 +41,8 @@ sealed class Worker : BackgroundService
 
 The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
+After `StopAsync` returns, an observable `BackgroundService.ExecuteTask` is still awaited within the remaining configured bounds. A task that remains running is reported as `ServiceNoncompletion`; completion, fault, and cancellation are classified from the final observed task state.
+
 ## Host-backed mode
 
 Use host-backed mode when the test needs actual `IHost` registration and orchestration:
@@ -60,7 +62,7 @@ Direct mode remains the simplest option and does not require constructing a full
 
 - The harness proves the configured in-process test contract. It does not prove broker, database, container, or orchestrator durability.
 - Application code must mark its own readiness, stopping-token, and drain checkpoints. ShutdownSpec does not infer domain state.
-- The harness cannot safely interrupt an arbitrary synchronous infinite loop in the same process. Such a scenario is bounded and classified as a deadline or noncompletion outcome; use process isolation for a hard kill boundary.
+- The harness can bound asynchronous operations, but it cannot safely regain control from an arbitrary synchronous infinite loop on the calling process's thread. The blocked thread may remain after the truthful result is returned; use process isolation for a hard kill boundary.
 - A test deadline is not a production host shutdown timeout. Configure both deliberately for their separate purposes.
 - The package makes no product-owned network requests and emits no telemetry.
 

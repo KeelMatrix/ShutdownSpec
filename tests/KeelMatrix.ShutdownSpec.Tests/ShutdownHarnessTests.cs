@@ -55,6 +55,86 @@ public sealed class ShutdownHarnessTests
     }
 
     [Fact]
+    public async Task EarlyReturningStopWithRunningExecutionIsServiceNoncompletion()
+    {
+        var result = await ShutdownHarness
+            .For(() => new EarlyReturningRunningService())
+            .WithShutdownDeadline(TimeSpan.FromMilliseconds(30))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(200))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ServiceNoncompletion, result.Outcome);
+        Assert.True(result.StopCompleted);
+        Assert.Equal(ShutdownExecutionState.Running, result.ExecutionState);
+        Assert.True(result.ShutdownDeadlineFired);
+        Assert.False(result.HarnessDeadlineFired);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task EarlyReturningStopObservationUsesOuterDeadlineProvenance()
+    {
+        var result = await ShutdownHarness
+            .For(() => new EarlyReturningRunningService())
+            .WithShutdownDeadline(TimeSpan.FromSeconds(1))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(100))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ServiceNoncompletion, result.Outcome);
+        Assert.True(result.HarnessDeadlineFired);
+        Assert.False(result.ShutdownDeadlineFired);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task ExecutionCompletingAfterEarlyStopIsObservedAsClean()
+    {
+        var result = await ShutdownHarness
+            .For(() => new DelayedExecutionCompletionService())
+            .WithShutdownDeadline(TimeSpan.FromMilliseconds(200))
+            .WithHarnessDeadline(TimeSpan.FromSeconds(1))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.CleanCompletion, result.Outcome);
+        Assert.True(result.StopCompleted);
+        Assert.Equal(ShutdownExecutionState.Completed, result.ExecutionState);
+        Assert.True(result.ExecutionCompleted);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task ExecutionFaultAfterEarlyStopIsReported()
+    {
+        var result = await ShutdownHarness
+            .For(() => new DelayedExecutionFaultService())
+            .WithShutdownDeadline(TimeSpan.FromMilliseconds(200))
+            .WithHarnessDeadline(TimeSpan.FromSeconds(1))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ExecutionFault, result.Outcome);
+        Assert.True(result.StopCompleted);
+        Assert.Equal(ShutdownExecutionState.Faulted, result.ExecutionState);
+        Assert.Equal(typeof(InvalidOperationException).FullName, result.ExceptionTypeName);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task ExecutionCancellationAfterEarlyStopIsExpectedCancellation()
+    {
+        var result = await ShutdownHarness
+            .For(() => new DelayedExecutionCancellationService())
+            .WithShutdownDeadline(TimeSpan.FromMilliseconds(200))
+            .WithHarnessDeadline(TimeSpan.FromSeconds(1))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ExpectedCancellation, result.Outcome);
+        Assert.True(result.StopCompleted);
+        Assert.Equal(ShutdownExecutionState.Canceled, result.ExecutionState);
+        Assert.True(result.ExecutionCanceled);
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
     public async Task StopFaultIsNotClean()
     {
         var result = await ShutdownHarness.For(() => new StopFaultService()).RunAsync();
@@ -335,6 +415,68 @@ public sealed class ShutdownHarnessTests
     {
         public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task StopAsync(CancellationToken cancellationToken) => Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
+    }
+
+    private sealed class EarlyReturningRunningService : BackgroundService
+    {
+        public override Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None);
+    }
+
+    private sealed class DelayedExecutionCompletionService : BackgroundService
+    {
+        private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            _ = CompleteLaterAsync();
+            return Task.CompletedTask;
+        }
+
+        protected override Task ExecuteAsync(CancellationToken stoppingToken) => _completion.Task;
+
+        private async Task CompleteLaterAsync()
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+            _completion.TrySetResult(true);
+        }
+    }
+
+    private sealed class DelayedExecutionFaultService : BackgroundService
+    {
+        private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            _ = FaultLaterAsync();
+            return Task.CompletedTask;
+        }
+
+        protected override Task ExecuteAsync(CancellationToken stoppingToken) => _completion.Task;
+
+        private async Task FaultLaterAsync()
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20));
+            _completion.TrySetException(new InvalidOperationException("synthetic delayed execution fault"));
+        }
+    }
+
+    private sealed class DelayedExecutionCancellationService : BackgroundService
+    {
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            _ = StopThroughBaseLaterAsync(cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+
+        private async Task StopThroughBaseLaterAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), CancellationToken.None);
+            await base.StopAsync(cancellationToken);
+        }
     }
 
     private sealed class StopFaultService : IHostedService

@@ -1,0 +1,27 @@
+root = true
+
+[*]
+charset = utf-8-bom
+end_of_line = crlf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.cs]
+dotnet_style_qualification_for_field = false:error
+dotnet_style_qualification_for_property = false:error
+dotnet_style_qualification_for_method = false:error
+dotnet_style_qualification_for_event = false:error
+dotnet_style_require_accessibility_modifiers = always:error
+dotnet_diagnostic.RS0016.severity = error
+dotnet_diagnostic.RS0017.severity = error
+dotnet_diagnostic.RS0025.severity = error
+dotnet_diagnostic.RS0037.severity = error
+dotnet_diagnostic.CA1510.severity = none
+dotnet_diagnostic.CA1512.severity = none
+
+[*.{md,txt,xml,json,props,targets,csproj,config,slnx,ps1}]
+trim_trailing_whitespace = true
+
+[*.yml]
+end_of_line = lf

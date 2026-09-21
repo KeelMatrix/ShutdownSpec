@@ -1,0 +1,57 @@
+# ShutdownSpec Lifecycle Contract
+
+This document defines the v1 result semantics for KeelMatrix.ShutdownSpec. The harness checks an in-process lifecycle contract; it does not replace the host or prove external system durability.
+
+## Scenario lifecycle
+
+1. The factory creates one service instance.
+2. The harness starts the service with a startup token.
+3. The harness records readiness and application-owned probes when the consumer marks them.
+4. The harness starts graceful shutdown with a distinct host shutdown token.
+5. The harness observes the service and, for `BackgroundService`, its public execution task when available from the targeted hosting package.
+6. Bounded cleanup runs after failure, cancellation, or noncompletion.
+
+The caller cancellation token and the harness outer deadline control the harness wait. They are not the host shutdown token, and neither is the `BackgroundService` stopping token passed by the hosting implementation to `ExecuteAsync`.
+
+`WithStartupDeadline` and `WithShutdownDeadline` bound lifecycle phases. `WithHarnessDeadline` is the outer safety boundary. A default test deadline is not a production host shutdown timeout.
+
+## Outcomes
+
+| Outcome | Meaning |
+| --- | --- |
+| `CleanCompletion` | Startup and graceful shutdown completed without an unexpected fault or missed host deadline. |
+| `ExpectedCancellation` | The service completed through expected cancellation. |
+| `ExecutionNotStarted` | Immediate stop completed before a background execution body became observable. This is not a clean result. |
+| `StartupFailure` | Factory or `StartAsync` failed. |
+| `StopFault` | `StopAsync` or host shutdown failed unexpectedly. |
+| `ExecutionFault` | A public `BackgroundService.ExecuteTask` or an observed execution task faulted. |
+| `HarnessDeadline` | The outer harness deadline expired before the lifecycle could reach graceful shutdown. |
+| `CallerCancellation` | The caller cancellation token ended the harness wait. |
+| `ServiceNoncompletion` | The service was still incomplete at the shutdown or outer harness deadline. |
+| `CleanupFailure` | Bounded cleanup failed after the primary outcome; the primary outcome remains available in the result. |
+
+An unexpected fault never becomes a clean result. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes.
+
+## Application-owned probes
+
+ShutdownSpec cannot infer that a queue, database, or broker is drained. Create a `ShutdownProbe`, mark it from application-owned code, register it with `WithProbe`, and assert it with `ShouldObserve`. Register a readiness probe with `WithReadinessProbe` when the service must reach a known ready state before shutdown begins. A stopping-token probe can be marked from the service's own stopping-token registration.
+
+Probe names are bounded and only their observed names are included in the default diagnostic report. Probe payloads are never transmitted or logged by the library.
+
+## Diagnostics
+
+`ShutdownResult.ToDiagnosticString()` reports a stable failure code, phase, elapsed startup/shutdown/cleanup durations, startup/stop/execution state, host-token and harness-deadline facts, and observed probe names. It reports exception type names but does not append arbitrary exception messages or stacks by default.
+
+The primary failure codes are:
+
+- `KMSHUT001` startup failure
+- `KMSHUT002` stop fault
+- `KMSHUT003` execution fault
+- `KMSHUT101` service noncompletion
+- `KMSHUT102` harness deadline
+- `KMSHUT103` caller cancellation
+- `KMSHUT104` execution not started before immediate stop
+
+## In-process limitation
+
+The harness cannot safely interrupt arbitrary application code that blocks synchronously forever in the same process. It bounds its wait and reports the control limitation, but the blocked thread may remain. Use process isolation when a hard kill boundary is part of the test contract.

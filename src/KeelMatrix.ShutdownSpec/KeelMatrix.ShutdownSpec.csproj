@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;netstandard2.0</TargetFrameworks>
+    <IsShippingProject>true</IsShippingProject>
+    <IsPackable>true</IsPackable>
+    <AssemblyName>KeelMatrix.ShutdownSpec</AssemblyName>
+    <RootNamespace>KeelMatrix.ShutdownSpec</RootNamespace>
+    <PackageId>KeelMatrix.ShutdownSpec</PackageId>
+    <Description>Contract-tests graceful shutdown for .NET IHostedService and BackgroundService implementations. Verifies cancellation, completion, faults and bounded shutdown with deterministic diagnostics.</Description>
+    <PackageTags>dotnet;testing;backgroundservice;ihostedservice;hosted-service;graceful-shutdown;cancellation;worker-service</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageIcon Condition="Exists('$(MSBuildProjectDirectory)/../../icon.png')">icon.png</PackageIcon>
+    <Copyright>Copyright (c) 2026 KeelMatrix</Copyright>
+    <Authors>KeelMatrix</Authors>
+    <RepositoryUrl>https://github.com/KeelMatrix/ShutdownSpec</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/KeelMatrix/ShutdownSpec#readme</PackageProjectUrl>
+    <PackageReleaseNotes>Initial release of the deterministic hosted-service shutdown contract harness.</PackageReleaseNotes>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="README.md" Visible="false" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="LICENSE" Visible="false" />
+    <None Include="../../icon.png" Pack="true" PackagePath="icon.png" Visible="false" Condition="Exists('$(MSBuildProjectDirectory)/../../icon.png')" Link="icon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+</Project>

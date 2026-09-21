@@ -448,10 +448,11 @@ public sealed class ShutdownHarnessTests
     public async Task LateFactoryResultIsDisposedAfterBoundedReturn()
     {
         var service = new DisposableHostService();
+        var releaseFactory = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var result = await ShutdownHarness
             .For(() =>
             {
-                Thread.Sleep(100);
+                releaseFactory.Task.GetAwaiter().GetResult();
                 return service;
             })
             .WithHarnessDeadline(TimeSpan.FromMilliseconds(10))
@@ -459,7 +460,9 @@ public sealed class ShutdownHarnessTests
             .RunAsync();
 
         Assert.Equal(ShutdownOutcome.FactoryNoncompletion, result.Outcome);
-        await Task.Delay(750);
+        releaseFactory.SetResult(true);
+        var disposed = await Task.WhenAny(service.Disposed, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(service.Disposed, disposed);
         Assert.Equal(1, service.DisposeCount);
     }
 
@@ -893,10 +896,17 @@ public sealed class ShutdownHarnessTests
 
     private sealed class DisposableHostService : IHostedService, IDisposable
     {
+        private readonly TaskCompletionSource<bool> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int DisposeCount { get; private set; }
+        public Task Disposed => _disposed.Task;
         public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-        public void Dispose() => DisposeCount++;
+        public void Dispose()
+        {
+            DisposeCount++;
+            _disposed.TrySetResult(true);
+        }
     }
 
     private sealed class PartiallyStartedService : IHostedService

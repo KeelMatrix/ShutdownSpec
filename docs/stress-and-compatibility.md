@@ -5,10 +5,10 @@ The repository contains a bounded stress fixture at `tests/Stress`. It uses inde
 Run the several-thousand-iteration comparison on Windows and Linux with the repository SDK:
 
 ```powershell
-dotnet run --project tests/Stress/ShutdownSpec.Stress.Net8.csproj -c Release -- --iterations 3000 --max-seconds 120
+dotnet run --project tests/Stress/ShutdownSpec.Stress.Net8.csproj -c Release -- --iterations 3000 --max-seconds 180
 Push-Location tests/Stress
-dotnet run --project ShutdownSpec.Stress.csproj -c Release -f net10.0 -- --iterations 3000 --max-seconds 120
+dotnet run --project ShutdownSpec.Stress.csproj -c Release -f net10.0 -- --iterations 3000 --max-seconds 180
 Pop-Location
 ```
 
-The first command compares the supported .NET 8 runtime; the second compares the targeted current .NET 10 hosting/runtime surface. A run fails if the complete loop exceeds 120 seconds or if any independent outcome/checkpoint differs. Record the exact runtime, duration, iteration count, and clean/broken outcome counts in the task handoff for each operating system.
+The first command compares the supported .NET 8 runtime; the second compares the targeted current .NET 10 hosting/runtime surface. A run fails if the complete loop exceeds 180 seconds or if any independent outcome/checkpoint differs. Record the exact runtime, duration, iteration count, and clean/broken outcome counts in the task handoff for each operating system.

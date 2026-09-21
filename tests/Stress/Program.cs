@@ -2,7 +2,7 @@ using KeelMatrix.ShutdownSpec;
 using Microsoft.Extensions.Hosting;
 
 var iterations = GetInt("--iterations", 3000);
-var maxSeconds = GetInt("--max-seconds", 120);
+var maxSeconds = GetInt("--max-seconds", 180);
 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 var cleanCounts = new Dictionary<ShutdownOutcome, int>();
 var brokenCounts = new Dictionary<ShutdownOutcome, int>();

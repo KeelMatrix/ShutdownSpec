@@ -4,7 +4,7 @@ This document defines the v1 result semantics for KeelMatrix.ShutdownSpec. The h
 
 ## Scenario lifecycle
 
-1. The factory creates one service instance.
+1. The factory creates one service instance within the outer harness deadline.
 2. The harness starts the service with a startup token.
 3. The harness records readiness and application-owned probes when the consumer marks them.
 4. The harness starts graceful shutdown with a distinct host shutdown token.
@@ -22,19 +22,25 @@ The caller cancellation token and the harness outer deadline control the harness
 | `CleanCompletion` | Startup and graceful shutdown completed without an unexpected fault or missed host deadline. |
 | `ExpectedCancellation` | The service completed through expected cancellation. |
 | `ExecutionNotStarted` | Immediate stop completed before a background execution body became observable. This is not a clean result. |
-| `StartupFailure` | Factory or `StartAsync` failed. |
+| `StartupFailure` | `StartAsync` or host construction failed after factory creation. |
 | `StopFault` | `StopAsync` or host shutdown failed unexpectedly. |
 | `ExecutionFault` | A public `BackgroundService.ExecuteTask` or an observed execution task faulted. |
 | `HarnessDeadline` | The outer harness deadline expired before the lifecycle could reach graceful shutdown. |
 | `CallerCancellation` | The caller cancellation token ended the harness wait. |
 | `ServiceNoncompletion` | The service was still incomplete at the shutdown or outer harness deadline. |
 | `CleanupFailure` | Bounded cleanup failed after the primary outcome; the primary outcome remains available in the result. |
+| `FactoryFailure` | The service factory failed before startup began. |
+| `FactoryNoncompletion` | The service factory did not return before the outer harness deadline. |
+| `StartupNoncompletion` | `StartAsync` or the readiness probe did not complete before the startup phase deadline. |
+| `CleanupNoncompletion` | Disposal did not return before the cleanup deadline; this is never a successful result. |
 
-An unexpected fault never becomes a clean result. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes.
+An unexpected fault or cancellation from an unrelated source never becomes a clean result. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop wait that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
 
 ## Application-owned probes
 
 ShutdownSpec cannot infer that a queue, database, or broker is drained. Create a `ShutdownProbe`, mark it from application-owned code, register it with `WithProbe`, and assert it with `ShouldObserve`. Register a readiness probe with `WithReadinessProbe` when the service must reach a known ready state before shutdown begins. A stopping-token probe can be marked from the service's own stopping-token registration.
+
+Probe state is reset at the beginning of every `RunAsync` call, so a reusable harness cannot satisfy a later readiness or observation assertion from an earlier run.
 
 Probe names are bounded and only their observed names are included in the default diagnostic report. Probe payloads are never transmitted or logged by the library.
 
@@ -51,7 +57,11 @@ The primary failure codes are:
 - `KMSHUT102` harness deadline
 - `KMSHUT103` caller cancellation
 - `KMSHUT104` execution not started before immediate stop
+- `KMSHUT106` factory failure
+- `KMSHUT107` factory noncompletion
+- `KMSHUT108` startup noncompletion
+- `KMSHUT109` cleanup noncompletion
 
 ## In-process limitation
 
-The harness cannot safely interrupt arbitrary application code that blocks synchronously forever in the same process. It bounds its wait and reports a deadline or noncompletion outcome, but the blocked thread may remain. Use process isolation when a hard kill boundary is part of the test contract.
+The harness cannot safely interrupt arbitrary application code that blocks synchronously forever in the same process, including a service factory or disposal. It bounds its wait and reports `FactoryNoncompletion`, `CleanupNoncompletion`, or another truthful deadline outcome, but the blocked thread may remain. Use process isolation when a hard kill boundary is part of the test contract.

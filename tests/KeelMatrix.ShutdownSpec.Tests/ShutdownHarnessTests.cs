@@ -67,8 +67,10 @@ public sealed class ShutdownHarnessTests
     [Fact]
     public async Task ExecutionFaultIsNotClean()
     {
+        var ready = new ShutdownProbe("faulted");
         var result = await ShutdownHarness
-            .For(() => new ExecutionFaultService())
+            .For(() => new ExecutionFaultService(ready))
+            .WithReadinessProbe(ready)
             .WithStartupDeadline(TimeSpan.FromSeconds(1))
             .WithShutdownDeadline(TimeSpan.FromSeconds(1))
             .RunAsync();
@@ -103,8 +105,133 @@ public sealed class ShutdownHarnessTests
             .WithCleanupDeadline(TimeSpan.FromMilliseconds(20))
             .RunAsync();
 
-        Assert.Equal(ShutdownOutcome.HarnessDeadline, result.Outcome);
+        Assert.Equal(ShutdownOutcome.StartupNoncompletion, result.Outcome);
         Assert.True(result.StartupDeadlineFired);
+        Assert.False(result.HarnessDeadlineFired);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task ReadinessDeadlineProvenanceIsExclusive()
+    {
+        var phaseResult = await ShutdownHarness
+            .For(new DirectService())
+            .WithReadinessProbe(new ShutdownProbe("never-ready"))
+            .WithStartupDeadline(TimeSpan.FromMilliseconds(20))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(200))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.StartupNoncompletion, phaseResult.Outcome);
+        Assert.True(phaseResult.StartupDeadlineFired);
+        Assert.False(phaseResult.HarnessDeadlineFired);
+        Assert.False(phaseResult.ShutdownDeadlineFired);
+
+        var outerResult = await ShutdownHarness
+            .For(new DirectService())
+            .WithReadinessProbe(new ShutdownProbe("never-ready"))
+            .WithStartupDeadline(TimeSpan.FromSeconds(1))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(20))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.HarnessDeadline, outerResult.Outcome);
+        Assert.False(outerResult.StartupDeadlineFired);
+        Assert.True(outerResult.HarnessDeadlineFired);
+        Assert.False(outerResult.ShutdownDeadlineFired);
+    }
+
+    [Fact]
+    public async Task OuterDeadlineDuringStopDoesNotClaimShutdownDeadline()
+    {
+        var result = await ShutdownHarness
+            .For(new DelayedStopService())
+            .WithStartupDeadline(TimeSpan.FromSeconds(1))
+            .WithShutdownDeadline(TimeSpan.FromSeconds(1))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(20))
+            .WithCleanupDeadline(TimeSpan.FromMilliseconds(20))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ServiceNoncompletion, result.Outcome);
+        Assert.True(result.HarnessDeadlineFired);
+        Assert.False(result.ShutdownDeadlineFired);
+        Assert.True(result.HostShutdownCancellationRequested);
+    }
+
+    [Fact]
+    public async Task ReusedProbeIsResetBetweenRuns()
+    {
+        var ready = new ShutdownProbe("ready");
+        var first = true;
+        var harness = ShutdownHarness
+            .For(() => new DirectService(() =>
+            {
+                if (first) ready.MarkObserved();
+                first = false;
+            }))
+            .WithReadinessProbe(ready)
+            .WithStartupDeadline(TimeSpan.FromMilliseconds(50))
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(200));
+
+        var firstResult = await harness.RunAsync();
+        var secondResult = await harness.RunAsync();
+
+        Assert.Equal(ShutdownOutcome.CleanCompletion, firstResult.Outcome);
+        Assert.Equal(ShutdownOutcome.StartupNoncompletion, secondResult.Outcome);
+        Assert.Empty(secondResult.ObservedProbeNames);
+        Assert.False(secondResult.Succeeded);
+    }
+
+    [Fact]
+    public async Task FactoryIsBoundedByOuterDeadlineAndHasDistinctOutcome()
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await ShutdownHarness
+            .For(() =>
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(150));
+                return new DirectService();
+            })
+            .WithHarnessDeadline(TimeSpan.FromMilliseconds(20))
+            .RunAsync();
+        stopwatch.Stop();
+
+        Assert.Equal(ShutdownOutcome.FactoryNoncompletion, result.Outcome);
+        Assert.True(result.HarnessDeadlineFired);
+        Assert.False(result.StartupCompleted);
+        Assert.False(result.Succeeded);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(120), result.ToDiagnosticString());
+    }
+
+    [Fact]
+    public async Task CleanupTimeoutIsPrimaryFailure()
+    {
+        var result = await ShutdownHarness
+            .For(new SlowDisposeService())
+            .WithCleanupDeadline(TimeSpan.FromMilliseconds(5))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.CleanupNoncompletion, result.Outcome);
+        Assert.True(result.CleanupTimedOut);
+        Assert.False(result.CleanupCompleted);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task UnrelatedStopCancellationIsNotExpectedSuccess()
+    {
+        var result = await ShutdownHarness.For(new UnrelatedCancellationStopService()).RunAsync();
+
+        Assert.Equal(ShutdownOutcome.StopFault, result.Outcome);
+        Assert.False(result.Succeeded);
+        Assert.False(result.HostShutdownCancellationRequested);
+    }
+
+    [Fact]
+    public async Task UnrelatedExecutionCancellationIsNotExpectedSuccess()
+    {
+        var result = await ShutdownHarness.For(new UnrelatedExecutionCancellationService()).RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ExecutionFault, result.Outcome);
+        Assert.True(result.ExecutionCanceled);
         Assert.False(result.Succeeded);
     }
 
@@ -221,10 +348,66 @@ public sealed class ShutdownHarnessTests
 
     private sealed class ExecutionFaultService : BackgroundService
     {
+        private readonly ShutdownProbe _ready;
+        private readonly TaskCompletionSource<bool> _faulted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ExecutionFaultService(ShutdownProbe ready) => _ready = ready;
+
+        public override async Task StartAsync(CancellationToken cancellationToken)
+        {
+            await base.StartAsync(cancellationToken);
+            await _faulted.Task;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            _ready.MarkObserved();
+            await Task.Yield();
+            _faulted.TrySetResult(true);
+            throw new InvalidOperationException("synthetic execution fault");
+        }
+    }
+
+    private sealed class DelayedStopService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) => Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
+    }
+
+    private sealed class SlowDisposeService : IHostedService, IDisposable
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public void Dispose() => Thread.Sleep(TimeSpan.FromMilliseconds(100));
+    }
+
+    private sealed class UnrelatedCancellationStopService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            using var unrelated = new CancellationTokenSource();
+            unrelated.Cancel();
+            return Task.FromCanceled(unrelated.Token);
+        }
+    }
+
+    private sealed class UnrelatedExecutionCancellationService : BackgroundService
+    {
+        public override async Task StartAsync(CancellationToken cancellationToken)
+        {
+            await base.StartAsync(cancellationToken);
+            try { await ExecuteTask!; }
+            catch (OperationCanceledException) { }
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             await Task.Yield();
-            throw new InvalidOperationException("synthetic execution fault");
+            using var unrelated = new CancellationTokenSource();
+            unrelated.Cancel();
+            await Task.FromCanceled(unrelated.Token);
         }
     }
 

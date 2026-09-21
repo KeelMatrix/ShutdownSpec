@@ -12,7 +12,7 @@ public enum ShutdownOutcome
     /// <summary>The execution task was canceled before its body became observable.</summary>
     ExecutionNotStarted,
 
-    /// <summary>The factory or start operation failed.</summary>
+    /// <summary>The service start operation failed.</summary>
     StartupFailure,
 
     /// <summary>The stop operation failed unexpectedly.</summary>
@@ -31,7 +31,19 @@ public enum ShutdownOutcome
     ServiceNoncompletion,
 
     /// <summary>Bounded cleanup failed after the primary scenario outcome.</summary>
-    CleanupFailure
+    CleanupFailure,
+
+    /// <summary>The service factory failed before startup began.</summary>
+    FactoryFailure,
+
+    /// <summary>The service factory did not return before the outer harness deadline.</summary>
+    FactoryNoncompletion,
+
+    /// <summary>The service did not complete startup or readiness before the startup deadline.</summary>
+    StartupNoncompletion,
+
+    /// <summary>Bounded cleanup did not return before its cleanup deadline.</summary>
+    CleanupNoncompletion
 }
 
 /// <summary>Identifies the lifecycle phase reached when a scenario finished.</summary>

@@ -25,6 +25,8 @@ public sealed class ShutdownProbe
     /// <summary>Marks this checkpoint as observed. Repeated calls are harmless.</summary>
     public void MarkObserved() => Interlocked.Exchange(ref _observed, 1);
 
+    internal void Reset() => Volatile.Write(ref _observed, 0);
+
     /// <summary>Registers this checkpoint to be marked when a cancellation token is canceled.</summary>
     /// <param name="cancellationToken">The application-owned cancellation token to observe.</param>
     /// <returns>A registration that can be disposed by the caller.</returns>

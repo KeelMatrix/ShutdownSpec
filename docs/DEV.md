@@ -19,10 +19,12 @@ dotnet test tests/KeelMatrix.ShutdownSpec.Tests/KeelMatrix.ShutdownSpec.Tests.cs
 dotnet restore KeelMatrix.ShutdownSpec.sln --configfile NuGet.config
 dotnet test KeelMatrix.ShutdownSpec.sln -c Release --no-restore
 pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1
+# Release-readiness mode additionally requires the repository-root icon.png.
+pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -ReleaseReadiness
 dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config
 ```
 
-The package gate builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder.
+The package gate builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. Ordinary development mode permits the repository-root icon to be absent. Release-readiness mode fails closed when that icon is absent or invalid.
 
 ## API baseline
 
@@ -30,4 +32,4 @@ The shipping project references `Microsoft.CodeAnalysis.PublicApiAnalyzers` unco
 
 ## Package smoke
 
-The smoke project deliberately has no project reference to the library. It runs a clean direct scenario and an ignored-cancellation scenario from the packed `.nupkg`, and checks that the latter is classified as service noncompletion rather than a false clean result.
+The smoke project deliberately has no project reference to the library. It runs the documented `BackgroundService` quick start and an ignored-cancellation scenario from the packed `.nupkg`, and checks that the latter is classified as service noncompletion rather than a false clean result.

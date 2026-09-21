@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [switch]$ReleaseReadiness
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,10 +18,15 @@ $smokeProject = Join-Path $repoRoot 'tests/PackageSmoke/PackageSmoke.csproj'
 $feedRoot = Join-Path $gateRoot 'feed'
 $packagesRoot = Join-Path $gateRoot 'packages'
 $artifactRoot = Join-Path $gateRoot 'artifacts'
+$iconPath = Join-Path $repoRoot 'icon.png'
 $packageId = 'KeelMatrix.ShutdownSpec'
 $version = '0.1.0'
 $nupkgName = "$packageId.$version.nupkg"
 $snupkgName = "$packageId.$version.snupkg"
+
+if ($ReleaseReadiness -and -not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
+    throw "Release-readiness package gate requires the repository-root icon.png."
+}
 
 if (Test-Path -LiteralPath $gateRoot) {
     Remove-Item -LiteralPath $gateRoot -Recurse -Force
@@ -69,7 +75,6 @@ if (Compare-Object -ReferenceObject $expectedArtifacts -DifferenceObject $artifa
 
 $nupkgPath = Join-Path $artifactRoot $nupkgName
 $snupkgPath = Join-Path $artifactRoot $snupkgName
-$iconPath = Join-Path $repoRoot 'icon.png'
 $nupkg = [IO.Compression.ZipFile]::OpenRead($nupkgPath)
 try {
     $required = @('_rels/.rels', '[Content_Types].xml', "$packageId.nuspec", 'README.md', 'LICENSE',
@@ -78,7 +83,7 @@ try {
     $allowed = @('^_rels/\.rels$', '^\[Content_Types\]\.xml$', "^$packageId\.nuspec$", '^README\.md$', '^LICENSE$',
         '^lib/net8\.0/KeelMatrix\.ShutdownSpec\.(dll|xml)$', '^lib/netstandard2\.0/KeelMatrix\.ShutdownSpec\.(dll|xml)$',
         '^package/services/metadata/core-properties/[^/]+\.psmdcp$')
-    if (Test-Path -LiteralPath $iconPath) {
+    if ($ReleaseReadiness -or (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
         $required += 'icon.png'
         $allowed += '^icon\.png$'
     }
@@ -93,7 +98,7 @@ try {
     if (Compare-Object -ReferenceObject @('.NETStandard2.0', 'net8.0') -DifferenceObject $dependencyGroups) { throw 'Package dependency target frameworks are incorrect.' }
 
     $iconMetadata = $metadata.icon
-    if (Test-Path -LiteralPath $iconPath) {
+    if ($ReleaseReadiness -or (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
         if ($iconMetadata -ne 'icon.png') { throw 'Package icon metadata is not icon.png.' }
         $rootHash = (Get-FileHash -LiteralPath $iconPath -Algorithm SHA256).Hash
         $iconEntry = $nupkg.GetEntry('icon.png')

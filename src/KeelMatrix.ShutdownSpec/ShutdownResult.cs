@@ -129,11 +129,17 @@ public sealed class ShutdownResult
     /// <summary>Gets the names of application-owned probes observed during the scenario.</summary>
     public IReadOnlyList<string> ObservedProbeNames { get; }
 
-    /// <summary>Gets whether this outcome is a clean or expected-cancellation result.</summary>
-    public bool Succeeded => Outcome == ShutdownOutcome.CleanCompletion || Outcome == ShutdownOutcome.ExpectedCancellation;
+    /// <summary>Gets whether the lifecycle and bounded cleanup both completed successfully.</summary>
+    public bool Succeeded => (Outcome == ShutdownOutcome.CleanCompletion || Outcome == ShutdownOutcome.ExpectedCancellation)
+        && CleanupCompleted
+        && !CleanupTimedOut;
 
     /// <summary>Gets whether an unexpected fault was observed.</summary>
-    public bool HasUnexpectedFault => Outcome == ShutdownOutcome.StartupFailure || Outcome == ShutdownOutcome.StopFault || Outcome == ShutdownOutcome.ExecutionFault;
+    public bool HasUnexpectedFault => Outcome == ShutdownOutcome.FactoryFailure
+        || Outcome == ShutdownOutcome.StartupFailure
+        || Outcome == ShutdownOutcome.StopFault
+        || Outcome == ShutdownOutcome.ExecutionFault
+        || Outcome == ShutdownOutcome.CleanupFailure;
 
     /// <summary>Checks that graceful shutdown completed within a configured assertion bound.</summary>
     /// <param name="deadline">The maximum acceptable shutdown duration.</param>
@@ -203,6 +209,10 @@ public sealed class ShutdownResult
             case ShutdownOutcome.CallerCancellation: return "KMSHUT103";
             case ShutdownOutcome.ExecutionNotStarted: return "KMSHUT104";
             case ShutdownOutcome.CleanupFailure: return "KMSHUT105";
+            case ShutdownOutcome.FactoryFailure: return "KMSHUT106";
+            case ShutdownOutcome.FactoryNoncompletion: return "KMSHUT107";
+            case ShutdownOutcome.StartupNoncompletion: return "KMSHUT108";
+            case ShutdownOutcome.CleanupNoncompletion: return "KMSHUT109";
             default: return "KMSHUT000";
         }
     }

@@ -115,6 +115,8 @@ public sealed class ShutdownHarness
     /// <returns>The bounded lifecycle result.</returns>
     public async Task<ShutdownResult> RunAsync(CancellationToken cancellationToken = default)
     {
+        foreach (var probe in _probes) probe.Reset();
+
         var stopwatch = Stopwatch.StartNew();
         var phase = ShutdownPhase.NotStarted;
         var outcome = ShutdownOutcome.CleanCompletion;
@@ -143,135 +145,192 @@ public sealed class ShutdownHarness
         try
         {
             phase = ShutdownPhase.Creating;
-            service = _factory();
-            if (service is null) throw new InvalidOperationException("The service factory returned null.");
-
-            phase = ShutdownPhase.Starting;
-            var startupClock = Stopwatch.StartNew();
-            using var startupCancellation = new CancellationTokenSource();
-            var startTask = Task.Run(async () =>
+            var factoryTask = Task.Run(() => _factory(), CancellationToken.None);
+            var factoryWait = await WaitForOperationAsync(factoryTask, Timeout.InfiniteTimeSpan, stopwatch, cancellationToken).ConfigureAwait(false);
+            if (factoryWait != WaitReason.Completed)
             {
-                if (_hostBuilderFactory is not null)
-                {
-                    var builder = _hostBuilderFactory();
-                    if (builder is null) throw new InvalidOperationException("The host builder factory returned null.");
-                    builder.ConfigureServices((_, services) => services.AddSingleton(typeof(IHostedService), service));
-                    host = builder.Build();
-                    await host.StartAsync(startupCancellation.Token).ConfigureAwait(false);
-                }
-                else
-                {
-                    await service.StartAsync(startupCancellation.Token).ConfigureAwait(false);
-                }
-            }, CancellationToken.None);
-
-            var startWait = await WaitForOperationAsync(startTask, _startupDeadline, stopwatch, cancellationToken).ConfigureAwait(false);
-            startupDuration = startupClock.Elapsed;
-            if (startWait != WaitReason.Completed)
-            {
-                startupDeadlineFired = startWait == WaitReason.PhaseDeadline;
-                harnessDeadlineFired = startWait == WaitReason.HarnessDeadline;
-                startupCancellation.Cancel();
-                outcome = startWait == WaitReason.CallerCancellation ? ShutdownOutcome.CallerCancellation : ShutdownOutcome.HarnessDeadline;
-                if (startWait != WaitReason.Completed) ObserveFault(startTask);
+                harnessDeadlineFired = factoryWait == WaitReason.HarnessDeadline;
+                outcome = factoryWait == WaitReason.CallerCancellation
+                    ? ShutdownOutcome.CallerCancellation
+                    : ShutdownOutcome.FactoryNoncompletion;
+                ObserveFault(factoryTask);
             }
             else
             {
                 try
                 {
-                    await startTask.ConfigureAwait(false);
-                    startupCompleted = true;
-                    phase = ShutdownPhase.Started;
+                    service = await factoryTask.ConfigureAwait(false);
+                    if (service is null) throw new InvalidOperationException("The service factory returned null.");
                 }
                 catch (Exception exception)
                 {
-                    outcome = ShutdownOutcome.StartupFailure;
+                    outcome = ShutdownOutcome.FactoryFailure;
                     exceptionTypeName = exception.GetType().FullName;
                     exceptionMessage = exception.Message;
                 }
             }
 
-            if (outcome == ShutdownOutcome.CleanCompletion && startupCompleted)
+            if (outcome == ShutdownOutcome.CleanCompletion && service is not null)
             {
-                executionTask = GetExecutionTask(service);
-                RefreshExecutionState(executionTask, ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
-
-                if (_readinessProbe is not null)
+                phase = ShutdownPhase.Starting;
+                var startupClock = Stopwatch.StartNew();
+                using var startupCancellation = new CancellationTokenSource();
+                var startTask = Task.Run(async () =>
                 {
-                    var remainingStartup = _startupDeadline - startupDuration;
-                    if (remainingStartup <= TimeSpan.Zero || !await WaitForProbeAsync(_readinessProbe, remainingStartup, stopwatch, cancellationToken).ConfigureAwait(false))
+                    if (_hostBuilderFactory is not null)
                     {
-                        startupDeadlineFired = true;
-                        startupCancellation.Cancel();
-                        outcome = cancellationToken.IsCancellationRequested ? ShutdownOutcome.CallerCancellation : ShutdownOutcome.HarnessDeadline;
-                    }
-                }
-            }
-
-            if (outcome == ShutdownOutcome.CleanCompletion && startupCompleted)
-            {
-                phase = ShutdownPhase.Stopping;
-                stopInitiated = true;
-                var shutdownClock = Stopwatch.StartNew();
-                using var shutdownCancellation = new CancellationTokenSource();
-                var stopTask = Task.Run(async () =>
-                {
-                    if (host is not null)
-                    {
-                        await host.StopAsync(shutdownCancellation.Token).ConfigureAwait(false);
+                        var builder = _hostBuilderFactory();
+                        if (builder is null) throw new InvalidOperationException("The host builder factory returned null.");
+                        builder.ConfigureServices((_, services) => services.AddSingleton(typeof(IHostedService), service));
+                        host = builder.Build();
+                        await host.StartAsync(startupCancellation.Token).ConfigureAwait(false);
                     }
                     else
                     {
-                        await service.StopAsync(shutdownCancellation.Token).ConfigureAwait(false);
+                        await service.StartAsync(startupCancellation.Token).ConfigureAwait(false);
                     }
                 }, CancellationToken.None);
 
-                var stopWait = await WaitForOperationAsync(stopTask, _shutdownDeadline, stopwatch, cancellationToken).ConfigureAwait(false);
-                shutdownDuration = shutdownClock.Elapsed;
-                hostShutdownCancellationRequested = shutdownCancellation.IsCancellationRequested;
-                shutdownDeadlineFired = hostShutdownCancellationRequested;
-                if (stopWait != WaitReason.Completed)
+                var startWait = await WaitForOperationAsync(startTask, _startupDeadline, stopwatch, cancellationToken).ConfigureAwait(false);
+                startupDuration = startupClock.Elapsed;
+                if (startWait != WaitReason.Completed)
                 {
-                    shutdownCancellation.Cancel();
-                    hostShutdownCancellationRequested = shutdownCancellation.IsCancellationRequested;
-                    shutdownDeadlineFired = stopWait == WaitReason.PhaseDeadline || hostShutdownCancellationRequested;
-                    harnessDeadlineFired = stopWait == WaitReason.HarnessDeadline;
-                    outcome = stopWait == WaitReason.CallerCancellation ? ShutdownOutcome.CallerCancellation : ShutdownOutcome.ServiceNoncompletion;
-                    ObserveFault(stopTask);
+                    startupDeadlineFired = startWait == WaitReason.PhaseDeadline;
+                    harnessDeadlineFired = startWait == WaitReason.HarnessDeadline;
+                    startupCancellation.Cancel();
+                    outcome = startWait switch
+                    {
+                        WaitReason.CallerCancellation => ShutdownOutcome.CallerCancellation,
+                        WaitReason.HarnessDeadline => ShutdownOutcome.HarnessDeadline,
+                        _ => ShutdownOutcome.StartupNoncompletion
+                    };
+                    ObserveFault(startTask);
                 }
                 else
                 {
-                    stopCompleted = true;
                     try
                     {
-                        await stopTask.ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        outcome = ShutdownOutcome.ExpectedCancellation;
+                        await startTask.ConfigureAwait(false);
+                        startupCompleted = true;
+                        phase = ShutdownPhase.Started;
                     }
                     catch (Exception exception)
                     {
-                        outcome = ShutdownOutcome.StopFault;
+                        outcome = ShutdownOutcome.StartupFailure;
                         exceptionTypeName = exception.GetType().FullName;
                         exceptionMessage = exception.Message;
                     }
                 }
 
-                RefreshExecutionState(executionTask ?? GetExecutionTask(service), ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
-                if (outcome == ShutdownOutcome.CleanCompletion)
+                if (outcome == ShutdownOutcome.CleanCompletion && startupCompleted)
                 {
-                    if (executionState == ShutdownExecutionState.Faulted)
+                    executionTask = GetExecutionTask(service);
+                    RefreshExecutionState(executionTask, ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
+
+                    if (_readinessProbe is not null)
                     {
-                        outcome = ShutdownOutcome.ExecutionFault;
+                        var remainingStartup = _startupDeadline - startupDuration;
+                        var readinessWait = remainingStartup <= TimeSpan.Zero
+                            ? WaitReason.PhaseDeadline
+                            : await WaitForProbeAsync(_readinessProbe, remainingStartup, stopwatch, cancellationToken).ConfigureAwait(false);
+                        startupDeadlineFired = readinessWait == WaitReason.PhaseDeadline;
+                        harnessDeadlineFired = readinessWait == WaitReason.HarnessDeadline;
+                        if (readinessWait != WaitReason.Completed)
+                        {
+                            startupCancellation.Cancel();
+                            outcome = readinessWait switch
+                            {
+                                WaitReason.CallerCancellation => ShutdownOutcome.CallerCancellation,
+                                WaitReason.HarnessDeadline => ShutdownOutcome.HarnessDeadline,
+                                _ => ShutdownOutcome.StartupNoncompletion
+                            };
+                        }
                     }
-                    else if (executionState == ShutdownExecutionState.Canceled)
+                }
+
+                if (outcome == ShutdownOutcome.CleanCompletion && startupCompleted)
+                {
+                    RefreshExecutionState(executionTask ?? GetExecutionTask(service), ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
+                    var executionCanceledBeforeStop = executionState == ShutdownExecutionState.Canceled;
+                    phase = ShutdownPhase.Stopping;
+                    stopInitiated = true;
+                    var shutdownClock = Stopwatch.StartNew();
+                    using var shutdownCancellation = new CancellationTokenSource();
+                    var stopTask = Task.Run(async () =>
                     {
-                        outcome = executionEntered ? ShutdownOutcome.ExpectedCancellation : ShutdownOutcome.ExecutionNotStarted;
+                        if (host is not null)
+                        {
+                            await host.StopAsync(shutdownCancellation.Token).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await service.StopAsync(shutdownCancellation.Token).ConfigureAwait(false);
+                        }
+                    }, CancellationToken.None);
+
+                    var stopWait = await WaitForOperationAsync(stopTask, _shutdownDeadline, stopwatch, cancellationToken).ConfigureAwait(false);
+                    shutdownDuration = shutdownClock.Elapsed;
+                    if (stopWait != WaitReason.Completed)
+                    {
+                        shutdownCancellation.Cancel();
+                        hostShutdownCancellationRequested = shutdownCancellation.IsCancellationRequested;
+                        shutdownDeadlineFired = stopWait == WaitReason.PhaseDeadline;
+                        harnessDeadlineFired = stopWait == WaitReason.HarnessDeadline;
+                        outcome = stopWait switch
+                        {
+                            WaitReason.CallerCancellation => ShutdownOutcome.CallerCancellation,
+                            _ => ShutdownOutcome.ServiceNoncompletion
+                        };
+                        ObserveFault(stopTask);
                     }
-                    else if (shutdownDeadlineFired && (!stopCompleted || executionState == ShutdownExecutionState.Running))
+                    else
                     {
-                        outcome = ShutdownOutcome.ServiceNoncompletion;
+                        stopCompleted = true;
+                        try
+                        {
+                            await stopTask.ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (shutdownCancellation.IsCancellationRequested)
+                        {
+                            outcome = ShutdownOutcome.ExpectedCancellation;
+                        }
+                        catch (OperationCanceledException exception)
+                        {
+                            outcome = ShutdownOutcome.StopFault;
+                            exceptionTypeName = exception.GetType().FullName;
+                            exceptionMessage = exception.Message;
+                        }
+                        catch (Exception exception)
+                        {
+                            outcome = ShutdownOutcome.StopFault;
+                            exceptionTypeName = exception.GetType().FullName;
+                            exceptionMessage = exception.Message;
+                        }
+                    }
+
+                    RefreshExecutionState(executionTask ?? GetExecutionTask(service), ref executionState, ref executionEntered, ref executionCompleted, ref executionCanceled, ref exceptionTypeName, ref exceptionMessage);
+                    if (outcome == ShutdownOutcome.CleanCompletion)
+                    {
+                        if (executionState == ShutdownExecutionState.Faulted)
+                        {
+                            outcome = ShutdownOutcome.ExecutionFault;
+                        }
+                        else if (executionState == ShutdownExecutionState.Canceled)
+                        {
+                            if (executionCanceledBeforeStop)
+                            {
+                                outcome = ShutdownOutcome.ExecutionFault;
+                                exceptionTypeName ??= typeof(OperationCanceledException).FullName;
+                            }
+                            else
+                            {
+                                outcome = executionEntered ? ShutdownOutcome.ExpectedCancellation : ShutdownOutcome.ExecutionNotStarted;
+                            }
+                        }
+                        else if (shutdownDeadlineFired && (!stopCompleted || executionState == ShutdownExecutionState.Running))
+                        {
+                            outcome = ShutdownOutcome.ServiceNoncompletion;
+                        }
                     }
                 }
             }
@@ -300,11 +359,15 @@ public sealed class ShutdownHarness
                     (service as IDisposable)?.Dispose();
                 }
             }, CancellationToken.None);
-            var cleanupWait = await WaitForOperationAsync(cleanupTask, _cleanupDeadline, stopwatch, CancellationToken.None).ConfigureAwait(false);
+            var cleanupWait = await WaitForOperationAsync(cleanupTask, _cleanupDeadline, stopwatch, CancellationToken.None, includeHarnessDeadline: false).ConfigureAwait(false);
             cleanupDuration = cleanupClock.Elapsed;
             cleanupCompleted = cleanupWait == WaitReason.Completed;
             cleanupTimedOut = !cleanupCompleted;
-            if (!cleanupCompleted) ObserveFault(cleanupTask);
+            if (!cleanupCompleted)
+            {
+                outcome = ShutdownOutcome.CleanupNoncompletion;
+                ObserveFault(cleanupTask);
+            }
             if (cleanupCompleted)
             {
                 try { await cleanupTask.ConfigureAwait(false); }
@@ -368,11 +431,11 @@ public sealed class ShutdownHarness
             return;
         }
 
-        executionEntered = !executionTask.IsCanceled;
         executionCompleted = executionTask.Status == TaskStatus.RanToCompletion;
         executionCanceled = executionTask.IsCanceled;
         if (executionTask.IsFaulted)
         {
+            executionEntered = true;
             state = ShutdownExecutionState.Faulted;
             var exception = executionTask.Exception?.GetBaseException();
             exceptionTypeName ??= exception?.GetType().FullName;
@@ -384,35 +447,39 @@ public sealed class ShutdownHarness
         }
         else if (executionTask.IsCompleted)
         {
+            executionEntered = true;
             state = ShutdownExecutionState.Completed;
         }
         else
         {
+            executionEntered = true;
             state = ShutdownExecutionState.Running;
         }
     }
 
-    private async Task<bool> WaitForProbeAsync(ShutdownProbe probe, TimeSpan phaseDeadline, Stopwatch stopwatch, CancellationToken callerCancellationToken)
+    private async Task<WaitReason> WaitForProbeAsync(ShutdownProbe probe, TimeSpan phaseDeadline, Stopwatch stopwatch, CancellationToken callerCancellationToken)
     {
         var phaseEnd = stopwatch.Elapsed + phaseDeadline;
         while (!probe.IsObserved)
         {
             var remainingPhase = phaseEnd - stopwatch.Elapsed;
             var remainingHarness = _harnessDeadline - stopwatch.Elapsed;
-            if (remainingHarness <= TimeSpan.Zero || remainingPhase <= TimeSpan.Zero || callerCancellationToken.IsCancellationRequested) return false;
+            if (callerCancellationToken.IsCancellationRequested) return WaitReason.CallerCancellation;
+            if (remainingHarness <= TimeSpan.Zero) return WaitReason.HarnessDeadline;
+            if (remainingPhase <= TimeSpan.Zero) return WaitReason.PhaseDeadline;
             var delay = TimeSpan.FromMilliseconds(Math.Min(10, Math.Min(remainingPhase.TotalMilliseconds, remainingHarness.TotalMilliseconds)));
             await Task.Delay(delay, CancellationToken.None).ConfigureAwait(false);
         }
-        return true;
+        return WaitReason.Completed;
     }
 
-    private async Task<WaitReason> WaitForOperationAsync(Task operation, TimeSpan phaseDeadline, Stopwatch stopwatch, CancellationToken callerCancellationToken)
+    private async Task<WaitReason> WaitForOperationAsync(Task operation, TimeSpan phaseDeadline, Stopwatch stopwatch, CancellationToken callerCancellationToken, bool includeHarnessDeadline = true)
     {
         if (operation.IsCompleted) return WaitReason.Completed;
         var remainingHarness = _harnessDeadline - stopwatch.Elapsed;
-        if (remainingHarness <= TimeSpan.Zero) return WaitReason.HarnessDeadline;
+        if (includeHarnessDeadline && remainingHarness <= TimeSpan.Zero) return WaitReason.HarnessDeadline;
         var phaseTask = Task.Delay(phaseDeadline, CancellationToken.None);
-        var harnessTask = Task.Delay(remainingHarness, CancellationToken.None);
+        var harnessTask = includeHarnessDeadline ? Task.Delay(remainingHarness, CancellationToken.None) : Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None);
         var callerTask = Task.Delay(Timeout.Infinite, callerCancellationToken);
         var winner = await Task.WhenAny(operation, phaseTask, harnessTask, callerTask).ConfigureAwait(false);
         if (winner == operation) return WaitReason.Completed;

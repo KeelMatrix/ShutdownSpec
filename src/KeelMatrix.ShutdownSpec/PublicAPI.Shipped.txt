@@ -19,11 +19,15 @@ KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.CallerCancellation = 7 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.CleanCompletion = 0 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.CleanupFailure = 9 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownOutcome.CleanupNoncompletion = 13 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.ExecutionFault = 5 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.ExecutionNotStarted = 2 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.ExpectedCancellation = 1 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownOutcome.FactoryFailure = 10 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownOutcome.FactoryNoncompletion = 11 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.HarnessDeadline = 6 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.ServiceNoncompletion = 8 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
+KeelMatrix.ShutdownSpec.ShutdownOutcome.StartupNoncompletion = 12 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.StartupFailure = 3 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownOutcome.StopFault = 4 -> KeelMatrix.ShutdownSpec.ShutdownOutcome
 KeelMatrix.ShutdownSpec.ShutdownPhase

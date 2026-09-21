@@ -1,8 +1,10 @@
 using KeelMatrix.ShutdownSpec;
 using Microsoft.Extensions.Hosting;
 
+var ready = new ShutdownProbe("ready");
 var clean = await ShutdownHarness
-    .For(() => new CleanService())
+    .For(() => new Worker(ready))
+    .WithReadinessProbe(ready)
     .WithStartupDeadline(TimeSpan.FromSeconds(1))
     .WithShutdownDeadline(TimeSpan.FromSeconds(1))
     .WithHarnessDeadline(TimeSpan.FromSeconds(2))
@@ -26,11 +28,18 @@ if (broken.Outcome != ShutdownOutcome.ServiceNoncompletion || !broken.ShutdownDe
 
 Console.WriteLine($"clean={clean.Outcome}; broken={broken.Outcome}; diagnostic={broken.ToDiagnosticString()}");
 
-sealed class CleanService : IHostedService
+sealed class Worker : BackgroundService
 {
-    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    private readonly ShutdownProbe _ready;
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Worker(ShutdownProbe ready) => _ready = ready;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _ready.MarkObserved();
+        try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
 }
 
 sealed class IgnoredCancellationService : IHostedService

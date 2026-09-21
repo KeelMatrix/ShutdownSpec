@@ -2,7 +2,8 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [switch]$ReleaseReadiness
+    [switch]$ReleaseReadiness,
+    [switch]$PngValidationSelfTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +65,81 @@ function Assert-ZipEntries {
     }
 }
 
+function Get-PngDimensions {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+
+    if ($Bytes.Length -lt 24) { throw 'Icon must be a PNG with an IHDR dimension header.' }
+
+    return [pscustomobject]@{
+        Width = ([uint32]$Bytes[16] -shl 24) -bor ([uint32]$Bytes[17] -shl 16) -bor ([uint32]$Bytes[18] -shl 8) -bor [uint32]$Bytes[19]
+        Height = ([uint32]$Bytes[20] -shl 24) -bor ([uint32]$Bytes[21] -shl 16) -bor ([uint32]$Bytes[22] -shl 8) -bor [uint32]$Bytes[23]
+    }
+}
+
+function Assert-PngIconBytes {
+    param([Parameter(Mandatory = $true)][byte[]]$Bytes)
+
+    if ($Bytes.Length -gt 200KB) { throw 'Icon exceeds the 200 KB limit.' }
+
+    $signature = @(137, 80, 78, 71, 13, 10, 26, 10)
+    if ($Bytes.Length -lt 24 -or (0..7 | Where-Object { $Bytes[$_] -ne $signature[$_] }).Count -gt 0) {
+        throw 'Icon must be a PNG.'
+    }
+
+    $dimensions = Get-PngDimensions -Bytes $Bytes
+    if ($dimensions.Width -ne 512 -or $dimensions.Height -ne 512) {
+        throw 'Icon must be exactly 512x512.'
+    }
+}
+
+function New-PngHeaderBytes {
+    param([int]$Width, [int]$Height)
+
+    $bytes = [byte[]]::new(24)
+    [Array]::Copy([byte[]](137, 80, 78, 71, 13, 10, 26, 10), 0, $bytes, 0, 8)
+    [Array]::Copy([byte[]](73, 72, 68, 82), 0, $bytes, 12, 4)
+    $bytes[18] = [byte](($Width -shr 8) -band 0xff)
+    $bytes[19] = [byte]($Width -band 0xff)
+    $bytes[22] = [byte](($Height -shr 8) -band 0xff)
+    $bytes[23] = [byte]($Height -band 0xff)
+    return $bytes
+}
+
+function Invoke-PngValidationSelfTest {
+    foreach ($case in @(
+            @{ Name = '256x256'; Width = 256; Height = 256 },
+            @{ Name = '1024x1024'; Width = 1024; Height = 1024 })) {
+        $bytes = New-PngHeaderBytes -Width $case.Width -Height $case.Height
+        $dimensions = Get-PngDimensions -Bytes $bytes
+        if ($dimensions.Width -ne $case.Width -or $dimensions.Height -ne $case.Height) {
+            throw "PNG dimension self-test failed for $($case.Name): got $($dimensions.Width)x$($dimensions.Height)."
+        }
+    }
+
+    try {
+        Assert-PngIconBytes -Bytes (New-PngHeaderBytes -Width 256 -Height 256)
+        throw 'PNG validation self-test expected a non-512x512 icon to fail closed.'
+    } catch {
+        if ($_.Exception.Message -ne 'Icon must be exactly 512x512.') { throw }
+    }
+
+    $oversized = [byte[]]::new(200KB + 1)
+    [Array]::Copy((New-PngHeaderBytes -Width 512 -Height 512), 0, $oversized, 0, 24)
+    try {
+        Assert-PngIconBytes -Bytes $oversized
+        throw 'PNG validation self-test expected an oversized icon to fail closed.'
+    } catch {
+        if ($_.Exception.Message -ne 'Icon exceeds the 200 KB limit.') { throw }
+    }
+
+    Write-Host 'PNG validation self-test passed: 256x256 and 1024x1024 parse correctly; non-512x512 and oversized inputs fail closed.'
+}
+
+if ($PngValidationSelfTest) {
+    Invoke-PngValidationSelfTest
+    exit 0
+}
+
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Invoke-Checked 'dotnet' @('pack', $project, '--configuration', $Configuration, '--output', $artifactRoot, '--configfile', (Join-Path $repoRoot 'NuGet.config'))
 
@@ -107,13 +183,9 @@ try {
         $file = [IO.File]::Create($tempIcon)
         try { $stream.CopyTo($file) } finally { $file.Dispose(); $stream.Dispose() }
         if ((Get-FileHash -LiteralPath $tempIcon -Algorithm SHA256).Hash -ne $rootHash) { throw 'Embedded icon is not byte-identical to the repository icon.' }
-        if ((Get-Item -LiteralPath $tempIcon).Length -gt 200KB) { throw 'Icon exceeds the 200 KB limit.' }
         $bytes = [IO.File]::ReadAllBytes($tempIcon)
-        $signature = @(137, 80, 78, 71, 13, 10, 26, 10)
-        if ($bytes.Length -lt 24 -or (0..7 | Where-Object { $bytes[$_] -ne $signature[$_] }).Count -gt 0) { throw 'Icon must be a PNG.' }
-        $width = ($bytes[16] -shl 24) -bor ($bytes[17] -shl 16) -bor ($bytes[18] -shl 8) -bor $bytes[19]
-        $height = ($bytes[20] -shl 24) -bor ($bytes[21] -shl 16) -bor ($bytes[22] -shl 8) -bor $bytes[23]
-        if ($width -ne 512 -or $height -ne 512) { throw 'Icon must be exactly 512x512.' }
+        Assert-PngIconBytes -Bytes $bytes
+        Write-Host 'Icon checks passed: 512x512, <=200 KB, byte-identical.'
     } elseif ($null -ne $iconMetadata) {
         throw 'Package declares an icon but the repository icon is absent.'
     }

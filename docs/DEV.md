@@ -24,6 +24,14 @@ pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -ReleaseReadiness
 dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config
 ```
 
+The package-gate PNG regression control can be run without building a package:
+
+```powershell
+pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -PngValidationSelfTest
+```
+
+It checks dimensions that exceed a byte and confirms that non-512x512 and oversized inputs fail closed.
+
 The package gate builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. Ordinary development mode permits the repository-root icon to be absent. Release-readiness mode fails closed when that icon is absent or invalid.
 
 ## API baseline

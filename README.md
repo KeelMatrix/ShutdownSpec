@@ -17,9 +17,11 @@ using KeelMatrix.ShutdownSpec;
 using Microsoft.Extensions.Hosting;
 
 var ready = new ShutdownProbe("ready");
+var executionEntered = new ShutdownProbe("execution-entered");
 var result = await ShutdownHarness
-    .For(() => new Worker(ready))
+    .For(() => new Worker(ready, executionEntered))
     .WithReadinessProbe(ready)
+    .WithExecutionProbe(executionEntered)
     .RunAsync();
 
 result.ShouldCompleteWithoutFault();
@@ -27,19 +29,25 @@ result.ShouldCompleteWithoutFault();
 sealed class Worker : BackgroundService
 {
     private readonly ShutdownProbe _ready;
+    private readonly ShutdownProbe _executionEntered;
 
-    public Worker(ShutdownProbe ready) => _ready = ready;
+    public Worker(ShutdownProbe ready, ShutdownProbe executionEntered)
+    {
+        _ready = ready;
+        _executionEntered = executionEntered;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _ready.MarkObserved();
+        _executionEntered.MarkObserved();
         try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 }
 ```
 
-The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
+The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Readiness is reported separately from the independently observed execution-entry checkpoint; a readiness probe never proves that the execution body entered. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
 After `StopAsync` returns, an observable `BackgroundService.ExecuteTask` is still awaited within the remaining configured bounds. A task that remains running is reported as `ServiceNoncompletion`; completion, fault, and cancellation are classified from the final observed task state.
 
@@ -49,9 +57,11 @@ Use host-backed mode when the test needs actual `IHost` registration and orchest
 
 ```csharp
 var ready = new ShutdownProbe("ready");
+var executionEntered = new ShutdownProbe("execution-entered");
 var result = await ShutdownHarness
-    .For(() => new Worker(ready))
+    .For(() => new Worker(ready, executionEntered))
     .WithReadinessProbe(ready)
+    .WithExecutionProbe(executionEntered)
     .WithHost(() => Host.CreateDefaultBuilder())
     .RunAsync();
 ```
@@ -61,7 +71,7 @@ Direct mode remains the simplest option and does not require constructing a full
 ## Important limitations
 
 - The harness proves the configured in-process test contract. It does not prove broker, database, container, or orchestrator durability.
-- Application code must mark its own readiness, stopping-token, and drain checkpoints. ShutdownSpec does not infer domain state.
+- Application code must mark its own readiness, execution-entry, stopping-token, and drain checkpoints. ShutdownSpec does not infer execution entry or domain state from readiness or task state.
 - The harness can bound asynchronous operations, but it cannot safely regain control from an arbitrary synchronous infinite loop on the calling process's thread. The blocked thread may remain after the truthful result is returned; use process isolation for a hard kill boundary.
 - A test deadline is not a production host shutdown timeout. Configure both deliberately for their separate purposes.
 - The package makes no product-owned network requests and emits no telemetry.

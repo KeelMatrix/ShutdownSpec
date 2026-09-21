@@ -368,6 +368,10 @@ public sealed class ShutdownHarness
                     {
                         outcome = ShutdownOutcome.ExecutionNotStarted;
                     }
+                    else if (outcome == ShutdownOutcome.CleanCompletion && service is BackgroundService && executionTask is null)
+                    {
+                        outcome = ShutdownOutcome.ExecutionNotStarted;
+                    }
                     shutdownDuration = shutdownClock.Elapsed;
                 }
             }
@@ -479,6 +483,7 @@ public sealed class ShutdownHarness
                 shutdownDuration,
                 cleanupDuration,
                 startupCompleted,
+                _readinessProbe?.IsObserved == true,
                 executionEntered,
                 stopInitiated,
                 stopCompleted,
@@ -509,7 +514,7 @@ public sealed class ShutdownHarness
         return result!;
     }
 
-    private bool IsExecutionEntered() => _executionProbe?.IsObserved == true || _readinessProbe?.IsObserved == true;
+    private bool IsExecutionEntered() => _executionProbe?.IsObserved == true;
 
     private static Task? GetExecutionTask(IHostedService service) => (service as BackgroundService)?.ExecuteTask;
 

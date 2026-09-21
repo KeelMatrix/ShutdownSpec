@@ -389,6 +389,48 @@ public sealed class ShutdownHarnessTests
     }
 
     [Fact]
+    public async Task ReadinessCannotProveExecutionEntryForUnrelatedCancellationAfterEarlyStop()
+    {
+        var ready = new ShutdownProbe("ready");
+        var entry = new ShutdownProbe("execution-entered");
+        var stopping = new ShutdownProbe("stopping-token");
+        var result = await ShutdownHarness
+            .For(() => new ReadinessOnlyUnrelatedCancellationAfterStopService(ready, stopping))
+            .WithReadinessProbe(ready)
+            .WithExecutionProbe(entry)
+            .WithStoppingProbe(stopping)
+            .WithShutdownDeadline(TimeSpan.FromMilliseconds(500))
+            .WithHarnessDeadline(TimeSpan.FromSeconds(1))
+            .RunAsync();
+
+        Assert.True(ready.IsObserved);
+        Assert.False(entry.IsObserved);
+        Assert.True(result.ReadinessObserved);
+        Assert.False(result.ExecutionEntered);
+        Assert.NotEqual(ShutdownOutcome.ExpectedCancellation, result.Outcome);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task ReadinessCannotProveABackgroundServiceBodyEntered()
+    {
+        var ready = new ShutdownProbe("ready");
+        var entry = new ShutdownProbe("execution-entered");
+        var result = await ShutdownHarness
+            .For(() => new ReadinessOnlyNeverEnteredService(ready))
+            .WithReadinessProbe(ready)
+            .WithExecutionProbe(entry)
+            .RunAsync();
+
+        Assert.True(ready.IsObserved);
+        Assert.False(entry.IsObserved);
+        Assert.True(result.ReadinessObserved);
+        Assert.False(result.ExecutionEntered);
+        Assert.Equal(ShutdownOutcome.ExecutionNotStarted, result.Outcome);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
     public async Task CancellationBeforeExecutionCheckpointIsNotExpectedCancellation()
     {
         var entry = new ShutdownProbe("execution-entered");
@@ -882,6 +924,62 @@ public sealed class ShutdownHarnessTests
             unrelated.Cancel();
             await Task.FromCanceled(unrelated.Token);
         }
+    }
+
+    private sealed class ReadinessOnlyUnrelatedCancellationAfterStopService : BackgroundService
+    {
+        private readonly ShutdownProbe _ready;
+        private readonly ShutdownProbe _stopping;
+        private readonly TaskCompletionSource<bool> _stopStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ReadinessOnlyUnrelatedCancellationAfterStopService(ShutdownProbe ready, ShutdownProbe stopping)
+        {
+            _ready = ready;
+            _stopping = stopping;
+        }
+
+        public override async Task StartAsync(CancellationToken cancellationToken)
+        {
+            _ready.MarkObserved();
+            await base.StartAsync(cancellationToken);
+        }
+
+        public override Task StopAsync(CancellationToken cancellationToken)
+        {
+            _stopStarted.TrySetResult(true);
+            _ = StopThroughBaseLaterAsync(cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            _ = _stopping.ObserveCancellation(stoppingToken);
+            await _stopStarted.Task;
+            using var unrelated = new CancellationTokenSource();
+            unrelated.Cancel();
+            await Task.FromCanceled(unrelated.Token);
+        }
+
+        private async Task StopThroughBaseLaterAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(20), CancellationToken.None);
+            await base.StopAsync(cancellationToken);
+        }
+    }
+
+    private sealed class ReadinessOnlyNeverEnteredService : BackgroundService
+    {
+        private readonly ShutdownProbe _ready;
+
+        public ReadinessOnlyNeverEnteredService(ShutdownProbe ready) => _ready = ready;
+
+        public override Task StartAsync(CancellationToken cancellationToken)
+        {
+            _ready.MarkObserved();
+            return Task.CompletedTask;
+        }
+
+        protected override Task ExecuteAsync(CancellationToken stoppingToken) => throw new InvalidOperationException("execution body must not be entered");
     }
 
     private sealed class CanceledBeforeExecutionService : BackgroundService

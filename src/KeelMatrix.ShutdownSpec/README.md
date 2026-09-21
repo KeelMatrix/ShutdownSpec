@@ -15,9 +15,11 @@ using KeelMatrix.ShutdownSpec;
 using Microsoft.Extensions.Hosting;
 
 var ready = new ShutdownProbe("ready");
+var executionEntered = new ShutdownProbe("execution-entered");
 var result = await ShutdownHarness
-    .For(() => new Worker(ready))
+    .For(() => new Worker(ready, executionEntered))
     .WithReadinessProbe(ready)
+    .WithExecutionProbe(executionEntered)
     .RunAsync();
 
 result.ShouldCompleteWithoutFault();
@@ -25,19 +27,25 @@ result.ShouldCompleteWithoutFault();
 sealed class Worker : BackgroundService
 {
     private readonly ShutdownProbe _ready;
+    private readonly ShutdownProbe _executionEntered;
 
-    public Worker(ShutdownProbe ready) => _ready = ready;
+    public Worker(ShutdownProbe ready, ShutdownProbe executionEntered)
+    {
+        _ready = ready;
+        _executionEntered = executionEntered;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _ready.MarkObserved();
+        _executionEntered.MarkObserved();
         try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
 }
 ```
 
-The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
+The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Readiness is reported separately from the independently observed execution-entry checkpoint; a readiness probe never proves that the execution body entered. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
 Use `WithExecutionProbe` for an application-owned checkpoint marked from the execution body. When testing expected cancellation, use `WithStoppingProbe` with a `ShutdownProbe` registered through `ObserveCancellation`; cancellation without those independent observations is reported conservatively.
 
@@ -47,20 +55,21 @@ Representative failure output for a worker that ignores cancellation:
 
 ```text
 KMSHUT101: ServiceNoncompletion.
-Phase: Completed
-Startup completed: True; stop initiated: True; stop completed: False
-Execution: Running; entered: True; completed: False; canceled: False
+Phase: Stopping
+Startup completed: True; stop initiated: True; stop completed: True
+Readiness observed: False; execution entry observed: False
+Execution: Running; completed: False; canceled: False
 Harness deadline: False; startup deadline: False; shutdown deadline: True
 Cleanup completed: True; cleanup timed out: False
 ```
 
 ## Probes and deadlines
 
-Create a `ShutdownProbe` in the test and mark it from application-owned code. Register it with `WithProbe` and assert it with `ShouldObserve`. Use `WithReadinessProbe` when shutdown must not begin until a readiness checkpoint has been observed.
+Create a `ShutdownProbe` in the test and mark it from application-owned code. Register it with `WithProbe` and assert it with `ShouldObserve`. Use `WithReadinessProbe` when shutdown must not begin until a readiness checkpoint has been observed. Use a separate `WithExecutionProbe` checkpoint from the execution body; readiness never proves execution entry.
 
 `WithStartupDeadline`, `WithShutdownDeadline`, and `WithHarnessDeadline` are separate. The startup token passed to `StartAsync`, the host shutdown token passed to `StopAsync`, the `BackgroundService` stopping token, the caller cancellation token, and the harness's outer safety deadline are recorded separately. A test deadline does not set or predict a production host timeout.
 
-The default test bounds are 5 seconds for startup, 5 seconds for shutdown, 15 seconds for the complete harness, and 1 second for cleanup. Use `WithExecutionProbe` and `WithStoppingProbe` when a cancellation result must be proven by independent application-owned checkpoints.
+The default test bounds are 5 seconds for startup, 5 seconds for shutdown, 15 seconds for the complete harness, and 1 second for cleanup. Use independently marked `WithExecutionProbe` and `WithStoppingProbe` checkpoints when a cancellation result must be proven; without execution-entry evidence, cancellation is classified conservatively and is never a successful expected-cancellation result.
 
 The package targets `net8.0` and `netstandard2.0` and is validated against `Microsoft.Extensions.Hosting` 10.0.12. The repository's public CI matrix validates it on Windows, Linux, and macOS. See the [canonical supported-platform statement](https://github.com/KeelMatrix/ShutdownSpec/blob/main/docs/contract.md#supported-platforms-and-dependency-boundary) for the full compatibility boundary. The package makes no network requests.
 

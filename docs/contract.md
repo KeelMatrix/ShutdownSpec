@@ -10,7 +10,7 @@ The package is validated on Windows, Linux, and macOS by the repository's public
 
 1. The factory creates one service instance within the outer harness deadline.
 2. The harness starts the service with a startup token.
-3. The harness records readiness and application-owned probes when the consumer marks them.
+3. The harness records readiness and application-owned probes when the consumer marks them; readiness is not execution-entry evidence.
 4. The harness starts graceful shutdown with a distinct host shutdown token.
 5. The harness observes the service and, for `BackgroundService`, its public execution task when available from the targeted hosting package.
 6. After `StopAsync` returns, a still-running observable execution task is awaited within the remaining shutdown and outer-harness bounds. A task that completes, faults, or cancels during that bounded observation is classified from its final state.
@@ -28,7 +28,7 @@ The defaults are 5 seconds for startup, 5 seconds for graceful shutdown, 15 seco
 | --- | --- |
 | `CleanCompletion` | Startup, graceful shutdown, and any bounded post-stop observation completed without an unexpected fault or missed deadline. |
 | `ExpectedCancellation` | The service completed through expected cancellation. |
-| `ExecutionNotStarted` | Immediate stop completed before a background execution body became observable. This is not a clean result. |
+| `ExecutionNotStarted` | Immediate stop completed before an independently configured execution-entry checkpoint was observed, including when a `BackgroundService` never created an observable execution task. Readiness alone does not change this classification. This is not a clean result. |
 | `StartupFailure` | `StartAsync` or host construction failed after factory creation. |
 | `StopFault` | `StopAsync` or host shutdown failed unexpectedly. |
 | `ExecutionFault` | A public `BackgroundService.ExecuteTask` or an observed execution task faulted. |
@@ -42,13 +42,13 @@ The defaults are 5 seconds for startup, 5 seconds for graceful shutdown, 15 seco
 | `CleanupNoncompletion` | Disposal did not return before the cleanup deadline; this is never a successful result. |
 | `ExecutionCancellationUnverified` | The observed execution task canceled after stop began, but no independently observed application stopping-token checkpoint proved that the cancellation came from the expected shutdown path. |
 
-An unexpected fault or cancellation from an unrelated source never becomes a clean result. A cancellation already present before graceful stop is classified as an execution fault; cancellation observed after stop begins is classified as expected cancellation only when an independently configured stopping-token probe was observed and the execution-entry checkpoint was observed. Otherwise the result is `ExecutionCancellationUnverified` or `ExecutionNotStarted`. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop or post-stop observation that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
+An unexpected fault or cancellation from an unrelated source never becomes a clean result. A cancellation already present before graceful stop is classified as an execution fault; cancellation observed after stop begins is classified as expected cancellation only when independently configured stopping-token and execution-entry probes were observed. Otherwise the result is `ExecutionCancellationUnverified` or `ExecutionNotStarted`. Readiness is exposed as `ReadinessObserved` and never contributes to `ExecutionEntered`, which is driven only by the execution-entry probe. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop or post-stop observation that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.
 
 ## Application-owned probes
 
-ShutdownSpec cannot infer that a queue, database, or broker is drained. Create a `ShutdownProbe`, mark it from application-owned code, register it with `WithProbe`, and assert it with `ShouldObserve`. Register a readiness probe with `WithReadinessProbe` when the service must reach a known ready state before shutdown begins. A stopping-token probe can be marked from the service's own stopping-token registration.
+ShutdownSpec cannot infer that a queue, database, or broker is drained. Create a `ShutdownProbe`, mark it from application-owned code, register it with `WithProbe`, and assert it with `ShouldObserve`. Register a readiness probe with `WithReadinessProbe` when the service must reach a known ready state before shutdown begins. Register a separate execution-entry probe with `WithExecutionProbe` and mark it from the execution body. A stopping-token probe can be marked from the service's own stopping-token registration.
 
-Probe state is reset at the beginning of every `RunAsync` call, so a reusable harness cannot satisfy a later readiness or observation assertion from an earlier run. Use `WithExecutionProbe` for an independently marked execution-entry checkpoint and `WithStoppingProbe` for a probe registered with the service's stopping token.
+Probe state is reset at the beginning of every `RunAsync` call, so a reusable harness cannot satisfy a later readiness or observation assertion from an earlier run. `ShutdownResult.ReadinessObserved` reports only the readiness probe; `ShutdownResult.ExecutionEntered` reports only the independently marked execution-entry checkpoint. Use `WithStoppingProbe` for a probe registered with the service's stopping token.
 
 Probe names are bounded and only their observed names are included in the default diagnostic report. Probe payloads are never transmitted or logged by the library.
 

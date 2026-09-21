@@ -16,6 +16,7 @@ public sealed class ShutdownResult
         TimeSpan shutdownDuration,
         TimeSpan cleanupDuration,
         bool startupCompleted,
+        bool readinessObserved,
         bool executionEntered,
         bool stopInitiated,
         bool stopCompleted,
@@ -49,6 +50,7 @@ public sealed class ShutdownResult
         ShutdownDuration = shutdownDuration;
         CleanupDuration = cleanupDuration;
         StartupCompleted = startupCompleted;
+        ReadinessObserved = readinessObserved;
         ExecutionEntered = executionEntered;
         StopInitiated = stopInitiated;
         StopCompleted = stopCompleted;
@@ -99,7 +101,10 @@ public sealed class ShutdownResult
     /// <summary>Gets whether startup completed successfully.</summary>
     public bool StartupCompleted { get; }
 
-    /// <summary>Gets whether background execution became observable before it completed.</summary>
+    /// <summary>Gets whether the configured application-owned readiness probe was observed.</summary>
+    public bool ReadinessObserved { get; }
+
+    /// <summary>Gets whether the independently configured application-owned execution-entry probe was observed.</summary>
     public bool ExecutionEntered { get; }
 
     /// <summary>Gets whether graceful shutdown was initiated.</summary>
@@ -232,7 +237,8 @@ public sealed class ShutdownResult
         builder.Append("Elapsed: ").Append(Elapsed.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms").AppendLine();
         builder.Append("Startup duration: ").Append(StartupDuration.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms; shutdown duration: ").Append(ShutdownDuration.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms; cleanup duration: ").Append(CleanupDuration.TotalMilliseconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append("ms").AppendLine();
         builder.Append("Startup completed: ").Append(StartupCompleted).Append("; stop initiated: ").Append(StopInitiated).Append("; stop completed: ").Append(StopCompleted).AppendLine();
-        builder.Append("Execution: ").Append(ExecutionState).Append("; entered: ").Append(ExecutionEntered).Append("; completed: ").Append(ExecutionCompleted).Append("; canceled: ").Append(ExecutionCanceled).AppendLine();
+        builder.Append("Readiness observed: ").Append(ReadinessObserved).Append("; execution entry observed: ").Append(ExecutionEntered).AppendLine();
+        builder.Append("Execution: ").Append(ExecutionState).Append("; completed: ").Append(ExecutionCompleted).Append("; canceled: ").Append(ExecutionCanceled).AppendLine();
         builder.Append("Harness deadline: ").Append(HarnessDeadlineFired).Append("; startup deadline: ").Append(StartupDeadlineFired).Append("; shutdown deadline: ").Append(ShutdownDeadlineFired).Append("; startup cancellation requested: ").Append(StartupCancellationRequested).AppendLine();
         builder.Append("Caller cancellation: ").Append(CallerCancellationRequested).Append("; host shutdown cancellation: ").Append(HostShutdownCancellationRequested).AppendLine();
         builder.Append("Primary outcome: ").Append(PrimaryOutcome).Append("; cleanup outcome: ").Append(CleanupOutcome?.ToString() ?? "none").Append("; cancellation notification faulted: ").Append(CancellationNotificationFaulted).Append("; notification pending: ").Append(CancellationNotificationPending).AppendLine();

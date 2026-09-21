@@ -1,1 +1,2 @@
 #nullable enable
+KeelMatrix.ShutdownSpec.ShutdownResult.ReadinessObserved.get -> bool

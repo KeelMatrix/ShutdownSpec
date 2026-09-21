@@ -11,10 +11,12 @@ public sealed class HostModeTests
     public async Task HostModeRunsRealHostLifecycle()
     {
         var ready = new ShutdownProbe("host-ready");
+        var entry = new ShutdownProbe("host-entry");
         var result = await ShutdownHarness
-            .For(() => new HostWorker(ready))
+            .For(() => new HostWorker(ready, entry))
             .WithHost(() => Host.CreateDefaultBuilder().ConfigureLogging(logging => logging.ClearProviders()))
             .WithReadinessProbe(ready)
+            .WithExecutionProbe(entry)
             .WithStartupDeadline(TimeSpan.FromSeconds(2))
             .WithShutdownDeadline(TimeSpan.FromSeconds(2))
             .WithHarnessDeadline(TimeSpan.FromSeconds(4))
@@ -45,14 +47,18 @@ public sealed class HostModeTests
     public async Task HostModeCanStartMultipleRegisteredServices()
     {
         var ready = new ShutdownProbe("primary-ready");
+        var entry = new ShutdownProbe("primary-entry");
         var secondary = new ShutdownProbe("secondary-ready");
+        var secondaryEntry = new ShutdownProbe("secondary-entry");
         var result = await ShutdownHarness
-            .For(() => new HostWorker(ready))
+            .For(() => new HostWorker(ready, entry))
             .WithHost(() => Host.CreateDefaultBuilder()
                 .ConfigureLogging(logging => logging.ClearProviders())
-                .ConfigureServices(services => services.AddSingleton<IHostedService>(new HostWorker(secondary))))
+                .ConfigureServices(services => services.AddSingleton<IHostedService>(new HostWorker(secondary, secondaryEntry))))
             .WithReadinessProbe(ready)
+            .WithExecutionProbe(entry)
             .WithProbe(secondary)
+            .WithProbe(secondaryEntry)
             .WithStartupDeadline(TimeSpan.FromSeconds(2))
             .WithShutdownDeadline(TimeSpan.FromSeconds(2))
             .WithHarnessDeadline(TimeSpan.FromSeconds(4))
@@ -66,12 +72,18 @@ public sealed class HostModeTests
     private sealed class HostWorker : BackgroundService
     {
         private readonly ShutdownProbe _ready;
+        private readonly ShutdownProbe _entry;
 
-        public HostWorker(ShutdownProbe ready) => _ready = ready;
+        public HostWorker(ShutdownProbe ready, ShutdownProbe entry)
+        {
+            _ready = ready;
+            _entry = entry;
+        }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _ready.MarkObserved();
+            _entry.MarkObserved();
             try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         }

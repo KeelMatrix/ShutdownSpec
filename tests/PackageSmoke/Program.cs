@@ -2,9 +2,11 @@ using KeelMatrix.ShutdownSpec;
 using Microsoft.Extensions.Hosting;
 
 var ready = new ShutdownProbe("ready");
+var executionEntered = new ShutdownProbe("execution-entered");
 var clean = await ShutdownHarness
-    .For(() => new Worker(ready))
+    .For(() => new Worker(ready, executionEntered))
     .WithReadinessProbe(ready)
+    .WithExecutionProbe(executionEntered)
     .WithStartupDeadline(TimeSpan.FromSeconds(1))
     .WithShutdownDeadline(TimeSpan.FromSeconds(1))
     .WithHarnessDeadline(TimeSpan.FromSeconds(2))
@@ -40,6 +42,46 @@ if (earlyReturn.Outcome != ShutdownOutcome.ServiceNoncompletion
     || earlyReturn.Succeeded)
 {
     throw new InvalidOperationException($"Unexpected early-return classification: {earlyReturn.ToDiagnosticString()}");
+}
+
+var adversarialReady = new ShutdownProbe("ready");
+var adversarialEntry = new ShutdownProbe("execution-entered");
+var adversarialStopping = new ShutdownProbe("stopping-token");
+var adversarialCancellation = await ShutdownHarness
+    .For(() => new ReadinessOnlyUnrelatedCancellationAfterStopService(adversarialReady, adversarialStopping))
+    .WithReadinessProbe(adversarialReady)
+    .WithExecutionProbe(adversarialEntry)
+    .WithStoppingProbe(adversarialStopping)
+    .WithShutdownDeadline(TimeSpan.FromMilliseconds(500))
+    .WithHarnessDeadline(TimeSpan.FromSeconds(1))
+    .RunAsync();
+
+if (!adversarialReady.IsObserved
+    || adversarialEntry.IsObserved
+    || !adversarialCancellation.ReadinessObserved
+    || adversarialCancellation.ExecutionEntered
+    || adversarialCancellation.Outcome == ShutdownOutcome.ExpectedCancellation
+    || adversarialCancellation.Succeeded)
+{
+    throw new InvalidOperationException($"Unexpected unproven-entry classification: {adversarialCancellation.ToDiagnosticString()}");
+}
+
+var neverEnteredReady = new ShutdownProbe("ready");
+var neverEnteredEntry = new ShutdownProbe("execution-entered");
+var neverEntered = await ShutdownHarness
+    .For(() => new ReadinessOnlyNeverEnteredService(neverEnteredReady))
+    .WithReadinessProbe(neverEnteredReady)
+    .WithExecutionProbe(neverEnteredEntry)
+    .RunAsync();
+
+if (!neverEnteredReady.IsObserved
+    || neverEnteredEntry.IsObserved
+    || !neverEntered.ReadinessObserved
+    || neverEntered.ExecutionEntered
+    || neverEntered.Outcome != ShutdownOutcome.ExecutionNotStarted
+    || neverEntered.Succeeded)
+{
+    throw new InvalidOperationException($"Unexpected never-entered classification: {neverEntered.ToDiagnosticString()}");
 }
 
 try
@@ -96,12 +138,18 @@ Console.WriteLine($"clean={clean.Outcome}; broken={broken.Outcome}; earlyReturn=
 sealed class Worker : BackgroundService
 {
     private readonly ShutdownProbe _ready;
+    private readonly ShutdownProbe _executionEntered;
 
-    public Worker(ShutdownProbe ready) => _ready = ready;
+    public Worker(ShutdownProbe ready, ShutdownProbe executionEntered)
+    {
+        _ready = ready;
+        _executionEntered = executionEntered;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _ready.MarkObserved();
+        _executionEntered.MarkObserved();
         try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
     }
@@ -119,6 +167,62 @@ sealed class EarlyReturningRunningService : BackgroundService
     public override Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None);
+}
+
+sealed class ReadinessOnlyUnrelatedCancellationAfterStopService : BackgroundService
+{
+    private readonly ShutdownProbe _ready;
+    private readonly ShutdownProbe _stopping;
+    private readonly TaskCompletionSource<bool> _stopStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public ReadinessOnlyUnrelatedCancellationAfterStopService(ShutdownProbe ready, ShutdownProbe stopping)
+    {
+        _ready = ready;
+        _stopping = stopping;
+    }
+
+    public override async Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ready.MarkObserved();
+        await base.StartAsync(cancellationToken);
+    }
+
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        _stopStarted.TrySetResult(true);
+        _ = StopThroughBaseLaterAsync(cancellationToken);
+        return Task.CompletedTask;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _ = _stopping.ObserveCancellation(stoppingToken);
+        await _stopStarted.Task;
+        using var unrelated = new CancellationTokenSource();
+        unrelated.Cancel();
+        await Task.FromCanceled(unrelated.Token);
+    }
+
+    private async Task StopThroughBaseLaterAsync(CancellationToken cancellationToken)
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(20), CancellationToken.None);
+        await base.StopAsync(cancellationToken);
+    }
+}
+
+sealed class ReadinessOnlyNeverEnteredService : BackgroundService
+{
+    private readonly ShutdownProbe _ready;
+
+    public ReadinessOnlyNeverEnteredService(ShutdownProbe ready) => _ready = ready;
+
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        _ready.MarkObserved();
+        return Task.CompletedTask;
+    }
+
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) => throw new InvalidOperationException("execution body must not be entered");
 }
 
 sealed class DelayedExecutionCompletionService : BackgroundService

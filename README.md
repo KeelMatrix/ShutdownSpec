@@ -13,37 +13,43 @@ dotnet add package KeelMatrix.ShutdownSpec
 Use the direct mode for the shortest path. The package does not require xUnit, NUnit, MSTest, or another test framework.
 
 ```csharp
+using KeelMatrix.ShutdownSpec;
+using Microsoft.Extensions.Hosting;
+
+var ready = new ShutdownProbe("ready");
 var result = await ShutdownHarness
-    .For(() => new Worker())
-    .WithStartupDeadline(TimeSpan.FromSeconds(1))
-    .WithShutdownDeadline(TimeSpan.FromSeconds(1))
+    .For(() => new Worker(ready))
+    .WithReadinessProbe(ready)
     .RunAsync();
 
-result.ShouldStopWithin(TimeSpan.FromSeconds(1));
 result.ShouldCompleteWithoutFault();
+
+sealed class Worker : BackgroundService
+{
+    private readonly ShutdownProbe _ready;
+
+    public Worker(ShutdownProbe ready) => _ready = ready;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _ready.MarkObserved();
+        try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
+}
 ```
 
-Register an application-owned checkpoint when the scenario needs to prove a lifecycle event such as queue draining:
-
-```csharp
-var drained = new ShutdownProbe("queue-drained");
-var result = await ShutdownHarness
-    .For(() => new Worker(drained))
-    .WithProbe(drained)
-    .RunAsync();
-
-result.ShouldObserve(drained);
-```
-
-The package reports structured outcomes for startup failure, `StopAsync` faults, execution faults, expected cancellation, caller cancellation, harness deadlines, execution that did not enter before immediate stop, and a service that remains incomplete at the shutdown or harness deadline.
+The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
 ## Host-backed mode
 
 Use host-backed mode when the test needs actual `IHost` registration and orchestration:
 
 ```csharp
+var ready = new ShutdownProbe("ready");
 var result = await ShutdownHarness
-    .For(() => new Worker())
+    .For(() => new Worker(ready))
+    .WithReadinessProbe(ready)
     .WithHost(() => Host.CreateDefaultBuilder())
     .RunAsync();
 ```

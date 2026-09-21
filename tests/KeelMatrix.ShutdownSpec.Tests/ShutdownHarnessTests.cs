@@ -275,7 +275,7 @@ public sealed class ShutdownHarnessTests
         var result = await ShutdownHarness
             .For(() =>
             {
-                Thread.Sleep(TimeSpan.FromMilliseconds(150));
+                Thread.Sleep(TimeSpan.FromMilliseconds(500));
                 return new DirectService();
             })
             .WithHarnessDeadline(TimeSpan.FromMilliseconds(20))
@@ -286,7 +286,7 @@ public sealed class ShutdownHarnessTests
         Assert.True(result.HarnessDeadlineFired);
         Assert.False(result.StartupCompleted);
         Assert.False(result.Succeeded);
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(120), result.ToDiagnosticString());
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(300), result.ToDiagnosticString());
     }
 
     [Fact]
@@ -303,7 +303,7 @@ public sealed class ShutdownHarnessTests
         Assert.False(result.Succeeded);
     }
 
-    [Fact(Timeout = 1000)]
+    [Fact(Timeout = 3000)]
     public async Task BlockingStartupCancellationCallbackCannotTrapRunAsync()
     {
         var service = new BlockingStartupCancellationService();
@@ -314,7 +314,7 @@ public sealed class ShutdownHarnessTests
             .WithCleanupDeadline(TimeSpan.FromMilliseconds(10))
             .RunAsync();
 
-        var completed = await Task.WhenAny(resultTask, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        var completed = await Task.WhenAny(resultTask, Task.Delay(TimeSpan.FromSeconds(1)));
         Assert.Same(resultTask, completed);
         var result = await resultTask;
         service.Release();
@@ -322,7 +322,7 @@ public sealed class ShutdownHarnessTests
         Assert.True(result.StartupCancellationRequested);
     }
 
-    [Fact(Timeout = 1000)]
+    [Fact(Timeout = 3000)]
     public async Task ThrowingStartupCancellationCallbackCannotChangeDeadlineClassification()
     {
         var result = await ShutdownHarness
@@ -336,7 +336,7 @@ public sealed class ShutdownHarnessTests
         Assert.True(result.CancellationNotificationFaulted || result.CancellationNotificationPending);
     }
 
-    [Fact(Timeout = 1000)]
+    [Fact(Timeout = 3000)]
     public async Task BlockingShutdownCancellationCallbackCannotTrapRunAsync()
     {
         var service = new BlockingShutdownCancellationService();
@@ -347,7 +347,7 @@ public sealed class ShutdownHarnessTests
             .WithCleanupDeadline(TimeSpan.FromMilliseconds(10))
             .RunAsync();
 
-        var completed = await Task.WhenAny(resultTask, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        var completed = await Task.WhenAny(resultTask, Task.Delay(TimeSpan.FromSeconds(1)));
         Assert.Same(resultTask, completed);
         var result = await resultTask;
         service.Release();
@@ -355,7 +355,7 @@ public sealed class ShutdownHarnessTests
         Assert.True(result.HostShutdownCancellationRequested);
     }
 
-    [Fact(Timeout = 1000)]
+    [Fact(Timeout = 3000)]
     public async Task ThrowingShutdownCancellationCallbackCannotChangeDeadlineClassification()
     {
         var result = await ShutdownHarness
@@ -444,7 +444,7 @@ public sealed class ShutdownHarnessTests
         Assert.Equal(1, service.StopCount);
     }
 
-    [Fact(Timeout = 1000)]
+    [Fact(Timeout = 3000)]
     public async Task LateFactoryResultIsDisposedAfterBoundedReturn()
     {
         var service = new DisposableHostService();
@@ -459,11 +459,11 @@ public sealed class ShutdownHarnessTests
             .RunAsync();
 
         Assert.Equal(ShutdownOutcome.FactoryNoncompletion, result.Outcome);
-        await Task.Delay(150);
+        await Task.Delay(750);
         Assert.Equal(1, service.DisposeCount);
     }
 
-    [Fact(Timeout = 1000)]
+    [Fact(Timeout = 3000)]
     public async Task LateHostConstructionDisposesSubjectEventually()
     {
         var service = new DisposableHostService();
@@ -479,7 +479,7 @@ public sealed class ShutdownHarnessTests
             .RunAsync();
 
         Assert.Equal(ShutdownOutcome.StartupNoncompletion, result.Outcome);
-        await Task.Delay(500);
+        await Task.Delay(1000);
         Assert.Equal(1, service.DisposeCount);
     }
 

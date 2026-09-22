@@ -149,6 +149,7 @@ public sealed class ShutdownHarnessTests
         var stopping = new ShutdownProbe("stopping-token");
         var result = await ShutdownHarness
             .For(() => new UnrelatedCancellationAfterStoppingService(entry, stopping))
+            .WithReadinessProbe(entry)
             .WithExecutionProbe(entry)
             .WithStoppingProbe(stopping)
             .WithShutdownDeadline(TimeSpan.FromMilliseconds(200))

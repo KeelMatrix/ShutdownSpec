@@ -77,6 +77,7 @@ public sealed class HostModeTests
         var result = await ShutdownHarness
             .For(() => new UnrelatedCancellationAfterStoppingService(entry, stopping))
             .WithHost(() => Host.CreateDefaultBuilder().ConfigureLogging(logging => logging.ClearProviders()))
+            .WithReadinessProbe(entry)
             .WithExecutionProbe(entry)
             .WithStoppingProbe(stopping)
             .WithShutdownDeadline(TimeSpan.FromSeconds(2))

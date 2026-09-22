@@ -137,6 +137,7 @@ var unrelatedEntry = new ShutdownProbe("execution-entered");
 var unrelatedStopping = new ShutdownProbe("stopping-token");
 var unrelatedCancellation = await ShutdownHarness
     .For(() => new UnrelatedCancellationAfterStoppingService(unrelatedEntry, unrelatedStopping))
+    .WithReadinessProbe(unrelatedEntry)
     .WithExecutionProbe(unrelatedEntry)
     .WithStoppingProbe(unrelatedStopping)
     .WithShutdownDeadline(TimeSpan.FromSeconds(1))

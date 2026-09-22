@@ -31,7 +31,7 @@ $snupkgName = "$packageId.$version.snupkg"
 $sensitivePackageEntryPattern = '(?i)(^|/)(?:.*\.env(?:\..*)?|.*\.(?:pfx|snk|key)|AGENTS\.md|.*(?:secret|credential).*)$'
 
 if ($ReleaseReadiness -and -not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
-    throw "Release-readiness package gate requires the repository-root icon.png."
+    throw "Release-readiness package gate requires the repository-root icon.png. Add the file at the repository root and run the package gate again."
 }
 
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must be a stable semantic version: $version" }

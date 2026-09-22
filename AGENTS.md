@@ -23,7 +23,7 @@ dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitiv
 - Tests and package smoke use a project reference or the built package respectively; the smoke project never uses a project reference.
 - The package is test-framework-neutral and makes no product-owned network requests.
 - The harness outer deadline, host shutdown token, caller cancellation, and service stopping token remain distinct in implementation, result state, and diagnostics.
-- Do not add a project-local icon. The pack configuration resolves the package icon to the repository-root `icon.png` when that repository-root icon.png exists.
+- Do not add a project-local icon. The pack configuration resolves the package icon to the repository-root `icon.png`, and the shipping pack validation requires that file.
 
 ## Validation
 

@@ -133,7 +133,25 @@ if (delayedCancellation.Outcome != ShutdownOutcome.ExpectedCancellation || !dela
     throw new InvalidOperationException($"Unexpected delayed-cancellation classification: {delayedCancellation.ToDiagnosticString()}");
 }
 
-Console.WriteLine($"clean={clean.Outcome}; broken={broken.Outcome}; earlyReturn={earlyReturn.Outcome}; delayedCompletion={delayedCompletion.Outcome}; delayedFault={delayedFault.Outcome}; delayedCancellation={delayedCancellation.Outcome}");
+var unrelatedEntry = new ShutdownProbe("execution-entered");
+var unrelatedStopping = new ShutdownProbe("stopping-token");
+var unrelatedCancellation = await ShutdownHarness
+    .For(() => new UnrelatedCancellationAfterStoppingService(unrelatedEntry, unrelatedStopping))
+    .WithExecutionProbe(unrelatedEntry)
+    .WithStoppingProbe(unrelatedStopping)
+    .WithShutdownDeadline(TimeSpan.FromSeconds(1))
+    .WithHarnessDeadline(TimeSpan.FromSeconds(2))
+    .RunAsync();
+
+if (unrelatedCancellation.Outcome != ShutdownOutcome.ExecutionCancellationUnverified
+    || !unrelatedEntry.IsObserved
+    || !unrelatedStopping.IsObserved
+    || unrelatedCancellation.Succeeded)
+{
+    throw new InvalidOperationException($"Unexpected unrelated-cancellation classification: {unrelatedCancellation.ToDiagnosticString()}");
+}
+
+Console.WriteLine($"clean={clean.Outcome}; broken={broken.Outcome}; earlyReturn={earlyReturn.Outcome}; delayedCompletion={delayedCompletion.Outcome}; delayedFault={delayedFault.Outcome}; delayedCancellation={delayedCancellation.Outcome}; unrelatedCancellation={unrelatedCancellation.Outcome}");
 
 sealed class Worker : BackgroundService
 {
@@ -298,5 +316,33 @@ sealed class DelayedExecutionCancellationService : BackgroundService
     {
         await Task.Delay(TimeSpan.FromMilliseconds(20), CancellationToken.None);
         await base.StopAsync(cancellationToken);
+    }
+}
+
+sealed class UnrelatedCancellationAfterStoppingService : BackgroundService
+{
+    private readonly ShutdownProbe _entry;
+    private readonly ShutdownProbe _stopping;
+
+    public UnrelatedCancellationAfterStoppingService(ShutdownProbe entry, ShutdownProbe stopping)
+    {
+        _entry = entry;
+        _stopping = stopping;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _entry.MarkObserved();
+        using var registration = _stopping.ObserveCancellation(stoppingToken);
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            using var unrelated = new CancellationTokenSource();
+            unrelated.Cancel();
+            throw new OperationCanceledException(unrelated.Token);
+        }
     }
 }

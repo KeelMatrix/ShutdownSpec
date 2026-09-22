@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="HostingCompatibility\**" />
     <ProjectReference Include="../../src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj" />
   </ItemGroup>
 </Project>

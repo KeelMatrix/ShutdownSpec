@@ -23,7 +23,7 @@ dotnet test tests/KeelMatrix.ShutdownSpec.Tests/KeelMatrix.ShutdownSpec.Tests.cs
 dotnet restore KeelMatrix.ShutdownSpec.sln --configfile NuGet.config
 dotnet test KeelMatrix.ShutdownSpec.sln -c Release --no-restore
 pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1
-# Release-readiness mode additionally requires the repository-root icon.png.
+# Both package-gate modes require the repository-root `icon.png`; release-readiness mode also performs the release-specific checks.
 pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -ReleaseReadiness
 pwsh -NoProfile -File scripts/Invoke-VulnerabilityAudit.ps1
 ```
@@ -36,7 +36,7 @@ pwsh -NoProfile -File scripts/Invoke-PackageGate.ps1 -PngValidationSelfTest
 
 It checks dimensions that exceed a byte and confirms that non-512x512 and oversized inputs fail closed.
 
-The package gate restores the solution, runs the same fail-closed direct-and-transitive vulnerability audit used by release verification, builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. The audit runs `dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config` and fails on a vulnerable package, an advisory-service error, a command failure, or an incomplete report. Ordinary development mode permits the repository-root icon to be absent. Release-readiness mode fails closed when that icon is absent or invalid.
+The package gate restores the solution, runs the same fail-closed direct-and-transitive vulnerability audit used by release verification, builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. The audit runs `dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config` and fails on a vulnerable package, an advisory-service error, a command failure, or an incomplete report. The shipping pack target requires the repository-root `icon.png` in ordinary development and release-readiness mode; release-readiness mode also fails closed when that icon is absent or invalid before the package is built.
 
 ## Release validation before tag creation
 
@@ -58,4 +58,4 @@ The smoke project deliberately has no project reference to the library. It runs 
 
 ## Stress and compatibility
 
-The bounded several-thousand-iteration fixture is documented in [stress-and-compatibility.md](stress-and-compatibility.md). The `net8.0` command uses the repository SDK; the `net10.0` comparison uses the nested `tests/Stress/global.json` and the targeted current hosting/runtime surface.
+The bounded several-thousand-iteration fixture and the isolated hosting-version comparison are documented in [stress-and-compatibility.md](stress-and-compatibility.md). The `net8.0` commands use the repository SDK; the `net10.0` commands run from `tests/Stress` so the comparison uses the nested SDK selection. The compatibility fixtures do not reference the shipping project and therefore do not change its dependency boundary.

@@ -149,7 +149,7 @@ public sealed class ShutdownResult
     /// <summary>Gets the latest observed execution-task state.</summary>
     public ShutdownExecutionState ExecutionState { get; }
 
-    /// <summary>Gets the captured exception type name without exposing it in the default report.</summary>
+    /// <summary>Gets the captured exception type name, which is included in the default diagnostic report.</summary>
     public string? ExceptionTypeName { get; }
 
     /// <summary>Gets the captured exception message for explicit caller inspection.</summary>
@@ -164,7 +164,7 @@ public sealed class ShutdownResult
     /// <summary>Gets a cleanup outcome, when cleanup failed independently of the primary scenario.</summary>
     public ShutdownOutcome? CleanupOutcome { get; }
 
-    /// <summary>Gets the cleanup exception type without exposing it in the default report.</summary>
+    /// <summary>Gets the cleanup exception type, which is included in the default diagnostic report.</summary>
     public string? CleanupExceptionTypeName { get; }
 
     /// <summary>Gets the cleanup exception message for explicit caller inspection.</summary>

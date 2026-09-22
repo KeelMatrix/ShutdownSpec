@@ -166,6 +166,7 @@ public sealed class ShutdownHarness
         var factoryTask = (Task<IHostedService>?)null;
         var startTask = (Task?)null;
         var cancellationNotifications = new List<CancellationNotification>();
+        var cancellationSources = new List<CancellationTokenSource>();
         var resources = new OwnedResources(_hostBuilderFactory is not null);
         ShutdownResult? result = null;
         var stoppingTokenObserved = false;
@@ -204,7 +205,8 @@ public sealed class ShutdownHarness
             {
                 phase = ShutdownPhase.Starting;
                 var startupClock = Stopwatch.StartNew();
-                using var startupCancellation = new CancellationTokenSource();
+                var startupCancellation = new CancellationTokenSource();
+                cancellationSources.Add(startupCancellation);
                 startTask = Task.Run(async () =>
                 {
                     if (_hostBuilderFactory is not null)
@@ -236,6 +238,7 @@ public sealed class ShutdownHarness
                     };
                     startupCancellationRequested = true;
                     cancellationNotifications.Add(RequestCancellation(startupCancellation));
+                    cancellationSources.Remove(startupCancellation);
                     ObserveFault(startTask);
                 }
                 else
@@ -276,6 +279,7 @@ public sealed class ShutdownHarness
                             };
                             startupCancellationRequested = true;
                             cancellationNotifications.Add(RequestCancellation(startupCancellation));
+                            cancellationSources.Remove(startupCancellation);
                         }
                     }
                 }
@@ -290,7 +294,8 @@ public sealed class ShutdownHarness
                     phase = ShutdownPhase.Stopping;
                     stopInitiated = true;
                     var shutdownClock = Stopwatch.StartNew();
-                    using var shutdownCancellation = new CancellationTokenSource();
+                    var shutdownCancellation = new CancellationTokenSource();
+                    cancellationSources.Add(shutdownCancellation);
                     var stopTask = Task.Run(async () =>
                     {
                         var host = resources.GetHost();
@@ -306,6 +311,7 @@ public sealed class ShutdownHarness
                         outcome = stopWait == WaitReason.CallerCancellation ? ShutdownOutcome.CallerCancellation : ShutdownOutcome.ServiceNoncompletion;
                         hostShutdownCancellationRequested = true;
                         cancellationNotifications.Add(RequestCancellation(shutdownCancellation));
+                        cancellationSources.Remove(shutdownCancellation);
                         ObserveFault(stopTask);
                         resources.TrackAbandonedOperation(stopTask);
                     }
@@ -341,6 +347,7 @@ public sealed class ShutdownHarness
                             outcome = executionWait == WaitReason.CallerCancellation ? ShutdownOutcome.CallerCancellation : ShutdownOutcome.ServiceNoncompletion;
                             hostShutdownCancellationRequested = true;
                             cancellationNotifications.Add(RequestCancellation(shutdownCancellation));
+                            cancellationSources.Remove(shutdownCancellation);
                             resources.TrackAbandonedOperation(executionTask);
                         }
                     }
@@ -361,8 +368,14 @@ public sealed class ShutdownHarness
                         stoppingTokenObserved = _stoppingProbe?.IsCancellationObserved == true;
                         if (executionCanceledBeforeStop) outcome = ShutdownOutcome.ExecutionFault;
                         else if (!executionEntered) outcome = ShutdownOutcome.ExecutionNotStarted;
-                        else if (!stoppingTokenObserved) outcome = ShutdownOutcome.ExecutionCancellationUnverified;
-                        else outcome = ShutdownOutcome.ExpectedCancellation;
+                        else
+                        {
+                            var executionCancellationToken = await GetExecutionCancellationTokenAsync(executionTask!).ConfigureAwait(false);
+                            var cancellationProven = _stoppingProbe is not null
+                                && stoppingTokenObserved
+                                && _stoppingProbe.CancellationTokenMatches(executionCancellationToken);
+                            outcome = cancellationProven ? ShutdownOutcome.ExpectedCancellation : ShutdownOutcome.ExecutionCancellationUnverified;
+                        }
                     }
                     else if (outcome == ShutdownOutcome.CleanCompletion && executionState == ShutdownExecutionState.Completed && !executionEntered)
                     {
@@ -400,7 +413,8 @@ public sealed class ShutdownHarness
                 }
                 else
                 {
-                    using var cleanupCancellation = new CancellationTokenSource();
+                    var cleanupCancellation = new CancellationTokenSource();
+                    cancellationSources.Add(cleanupCancellation);
                     var cleanupStopTask = Task.Run(async () =>
                     {
                         var host = resources.GetHost();
@@ -413,7 +427,8 @@ public sealed class ShutdownHarness
                         cleanupSucceeded = false;
                         cleanupOutcome = ShutdownOutcome.CleanupNoncompletion;
                         ObserveFault(cleanupStopTask);
-                        _ = RequestCancellation(cleanupCancellation);
+                        cancellationNotifications.Add(RequestCancellation(cleanupCancellation));
+                        cancellationSources.Remove(cleanupCancellation);
                         resources.TrackAbandonedOperation(cleanupStopTask);
                     }
                     else
@@ -431,9 +446,9 @@ public sealed class ShutdownHarness
             }
 
             var remainingForDispose = _cleanupDeadline - cleanupClock.Elapsed;
-            if (remainingForDispose > TimeSpan.Zero)
+            var disposeTask = resources.RequestCleanupAsync();
+            if (remainingForDispose > TimeSpan.Zero && !resources.CleanupPending)
             {
-                var disposeTask = resources.RequestCleanupAsync();
                 var disposeWait = await WaitForOperationAsync(disposeTask, remainingForDispose, stopwatch, CancellationToken.None, includeHarnessDeadline: false).ConfigureAwait(false);
                 if (disposeWait != WaitReason.Completed)
                 {
@@ -457,6 +472,7 @@ public sealed class ShutdownHarness
             {
                 cleanupSucceeded = false;
                 cleanupOutcome ??= ShutdownOutcome.CleanupNoncompletion;
+                ObserveFault(disposeTask);
             }
 
             cleanupDuration = cleanupClock.Elapsed;
@@ -509,6 +525,8 @@ public sealed class ShutdownHarness
                 cleanupCompleted,
                 cleanupTimedOut,
                 _probes.Where(probe => probe.IsObserved));
+
+            foreach (var source in cancellationSources) source.Dispose();
         }
 
         return result!;
@@ -517,6 +535,20 @@ public sealed class ShutdownHarness
     private bool IsExecutionEntered() => _executionProbe?.IsObserved == true;
 
     private static Task? GetExecutionTask(IHostedService service) => (service as BackgroundService)?.ExecuteTask;
+
+    private static async Task<CancellationToken> GetExecutionCancellationTokenAsync(Task executionTask)
+    {
+        try
+        {
+            await executionTask.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception)
+        {
+            return exception.CancellationToken;
+        }
+
+        return CancellationToken.None;
+    }
 
     private static void RefreshExecutionState(Task? executionTask, ref ShutdownExecutionState state, ref bool executionCompleted, ref bool executionCanceled, ref string? exceptionTypeName, ref string? exceptionMessage)
     {
@@ -585,7 +617,17 @@ public sealed class ShutdownHarness
 
     private static CancellationNotification RequestCancellation(CancellationTokenSource source)
     {
-        var task = Task.Run(() => source.Cancel(throwOnFirstException: false), CancellationToken.None);
+        var task = Task.Run(() =>
+        {
+            try
+            {
+                source.Cancel(throwOnFirstException: false);
+            }
+            finally
+            {
+                source.Dispose();
+            }
+        }, CancellationToken.None);
         ObserveFault(task);
         return new CancellationNotification(task);
     }
@@ -650,15 +692,18 @@ public sealed class ShutdownHarness
 
         public void TrackFactory(Task<IHostedService> factoryTask)
         {
+            TrackPendingOperation(factoryTask);
             _ = factoryTask.ContinueWith(completed =>
             {
                 if (completed.Status == TaskStatus.RanToCompletion && completed.Result is not null) RegisterService(completed.Result);
+                else if (completed.IsFaulted) _ = completed.Exception;
+                CompletePendingOperation();
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         public void RegisterService(IHostedService service)
         {
-            List<Action>? actions;
+            List<Func<Task>>? actions;
             lock (_sync)
             {
                 _service ??= service;
@@ -669,7 +714,7 @@ public sealed class ShutdownHarness
 
         public void RegisterHost(IHost host)
         {
-            List<Action>? actions;
+            List<Func<Task>>? actions;
             lock (_sync)
             {
                 _host = host;
@@ -680,19 +725,33 @@ public sealed class ShutdownHarness
 
         public void TrackHostConstruction(Task startTask)
         {
-            _ = startTask.ContinueWith(_ => MarkHostConstructionCompleted(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            TrackPendingOperation(startTask);
+            _ = startTask.ContinueWith(completed =>
+            {
+                if (completed.IsFaulted) _ = completed.Exception;
+                MarkHostConstructionCompleted();
+                CompletePendingOperation();
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         public void TrackAbandonedOperation(Task operation)
         {
-            if (operation.IsCompleted) return;
-            lock (_sync) _pendingOperations++;
-            _ = operation.ContinueWith(_ => CompleteAbandonedOperation(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            TrackPendingOperation(operation);
+            ObserveFault(operation);
+            _ = operation.ContinueWith(_ => CompletePendingOperation(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
-        private void CompleteAbandonedOperation()
+        private void TrackPendingOperation(Task operation)
         {
-            List<Action>? actions;
+            lock (_sync)
+            {
+                _pendingOperations++;
+            }
+        }
+
+        private void CompletePendingOperation()
+        {
+            List<Func<Task>>? actions;
             lock (_sync)
             {
                 _pendingOperations--;
@@ -703,7 +762,7 @@ public sealed class ShutdownHarness
 
         public void MarkHostConstructionCompleted()
         {
-            List<Action>? actions;
+            List<Func<Task>>? actions;
             lock (_sync)
             {
                 _hostConstructionCompleted = true;
@@ -719,7 +778,7 @@ public sealed class ShutdownHarness
 
         public Task<bool> RequestCleanupAsync()
         {
-            List<Action>? actions;
+            List<Func<Task>>? actions;
             lock (_sync)
             {
                 _cleanupRequested = true;
@@ -731,27 +790,36 @@ public sealed class ShutdownHarness
             return _cleanupCompletion.Task;
         }
 
-        private List<Action>? TakeDisposalsLocked()
+        public bool CleanupPending
         {
-            var actions = new List<Action>();
+            get
+            {
+                lock (_sync) return _pendingOperations != 0 && _service is null;
+            }
+        }
+
+        private List<Func<Task>>? TakeDisposalsLocked()
+        {
+            var actions = new List<Func<Task>>();
+            if (_pendingOperations != 0) return null;
             if (_host is not null && !_hostDisposed)
             {
                 _hostDisposed = true;
                 _serviceDisposed = true;
                 var host = _host;
                 var service = _service;
-                actions.Add(() => DisposeHostAndService(host, service));
+                actions.Add(() => DisposeHostAndServiceAsync(host, service));
             }
             else if (_service is not null && !_serviceDisposed && (!_hostBacked || _hostConstructionCompleted))
             {
                 _serviceDisposed = true;
                 var service = _service;
-                if (service is IDisposable disposable) actions.Add(disposable.Dispose);
+                if (service is IAsyncDisposable || service is IDisposable) actions.Add(() => DisposeObjectAsync(service));
             }
             return actions.Count == 0 ? null : actions;
         }
 
-        private void RunCleanupActions(List<Action>? actions)
+        private void RunCleanupActions(List<Func<Task>>? actions)
         {
             if (actions is null || actions.Count == 0)
             {
@@ -775,27 +843,42 @@ public sealed class ShutdownHarness
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
-        private static Task RunActionsAsync(List<Action>? actions)
+        private static Task RunActionsAsync(List<Func<Task>>? actions)
         {
             if (actions is null || actions.Count == 0) return Task.CompletedTask;
-            return Task.Run(() =>
+            return Task.Run(async () =>
             {
-                foreach (var action in actions) action();
+                foreach (var action in actions) await action().ConfigureAwait(false);
             }, CancellationToken.None);
         }
 
-        private static void DisposeHostAndService(IHost host, IHostedService? service)
+        private static async Task DisposeHostAndServiceAsync(IHost host, IHostedService? service)
         {
             var exceptions = new List<Exception>();
-            try { host.Dispose(); }
+            try { await DisposeObjectAsync(host).ConfigureAwait(false); }
             catch (Exception exception) { exceptions.Add(exception); }
-            try { (service as IDisposable)?.Dispose(); }
+            try
+            {
+                if (service is not null) await DisposeObjectAsync(service).ConfigureAwait(false);
+            }
             catch (Exception exception) { exceptions.Add(exception); }
             if (exceptions.Count == 1) throw exceptions[0];
             if (exceptions.Count > 1) throw new AggregateException(exceptions);
         }
 
-        private static void RunDetached(List<Action>? actions)
+        private static async Task DisposeObjectAsync(object disposable)
+        {
+            if (disposable is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            }
+            else if (disposable is IDisposable syncDisposable)
+            {
+                syncDisposable.Dispose();
+            }
+        }
+
+        private static void RunDetached(List<Func<Task>>? actions)
         {
             var task = RunActionsAsync(actions);
             if (!task.IsCompleted) ObserveFault(task);

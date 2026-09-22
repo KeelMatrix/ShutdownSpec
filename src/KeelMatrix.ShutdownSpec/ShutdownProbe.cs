@@ -7,6 +7,9 @@ public sealed class ShutdownProbe
 {
     private int _observed;
     private int _cancellationObserved;
+    private readonly object _cancellationSync = new();
+    private CancellationToken _observedCancellationToken;
+    private bool _hasObservedCancellationToken;
 
     /// <summary>Creates a named lifecycle checkpoint.</summary>
     /// <param name="name">A stable, non-empty diagnostic name of at most 100 characters.</param>
@@ -25,6 +28,14 @@ public sealed class ShutdownProbe
 
     internal bool IsCancellationObserved => Volatile.Read(ref _cancellationObserved) != 0;
 
+    internal bool CancellationTokenMatches(CancellationToken cancellationToken)
+    {
+        lock (_cancellationSync)
+        {
+            return _hasObservedCancellationToken && _observedCancellationToken == cancellationToken;
+        }
+    }
+
     /// <summary>Marks this checkpoint as observed. Repeated calls are harmless.</summary>
     public void MarkObserved() => Interlocked.Exchange(ref _observed, 1);
 
@@ -32,6 +43,11 @@ public sealed class ShutdownProbe
     {
         Volatile.Write(ref _observed, 0);
         Volatile.Write(ref _cancellationObserved, 0);
+        lock (_cancellationSync)
+        {
+            _observedCancellationToken = default;
+            _hasObservedCancellationToken = false;
+        }
     }
 
     /// <summary>Registers this checkpoint to be marked when a cancellation token is canceled.</summary>
@@ -39,6 +55,11 @@ public sealed class ShutdownProbe
     /// <returns>A registration that can be disposed by the caller.</returns>
     public IDisposable ObserveCancellation(CancellationToken cancellationToken)
     {
+        lock (_cancellationSync)
+        {
+            _observedCancellationToken = cancellationToken;
+            _hasObservedCancellationToken = true;
+        }
         return cancellationToken.Register(static state =>
         {
             var probe = (ShutdownProbe)state!;

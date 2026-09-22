@@ -6,9 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-
   <ItemGroup>
-    <Compile Remove="HostingCompatibility\**" />
-    <ProjectReference Include="../../src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj" />
+    <Compile Include="..\Program.cs" Link="Program.cs" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 </Project>

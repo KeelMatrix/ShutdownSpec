@@ -143,6 +143,25 @@ public sealed class ShutdownHarnessTests
     }
 
     [Fact]
+    public async Task UnrelatedExecutionCancellationWithBothShutdownProbesIsUnverified()
+    {
+        var entry = new ShutdownProbe("execution-entered");
+        var stopping = new ShutdownProbe("stopping-token");
+        var result = await ShutdownHarness
+            .For(() => new UnrelatedCancellationAfterStoppingService(entry, stopping))
+            .WithExecutionProbe(entry)
+            .WithStoppingProbe(stopping)
+            .WithShutdownDeadline(TimeSpan.FromMilliseconds(200))
+            .WithHarnessDeadline(TimeSpan.FromSeconds(1))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.ExecutionCancellationUnverified, result.Outcome);
+        Assert.True(result.ExecutionEntered);
+        Assert.True(result.StoppingTokenObserved);
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
     public async Task StopFaultIsNotClean()
     {
         var result = await ShutdownHarness.For(() => new StopFaultService()).RunAsync();
@@ -350,6 +369,9 @@ public sealed class ShutdownHarnessTests
         var completed = await Task.WhenAny(resultTask, Task.Delay(TimeSpan.FromSeconds(1)));
         Assert.Same(resultTask, completed);
         var result = await resultTask;
+        var callbackEntered = await Task.WhenAny(service.CallbackEntered, Task.Delay(TimeSpan.FromSeconds(1)));
+        Assert.Same(service.CallbackEntered, callbackEntered);
+        Assert.True(service.CancellationDelivered);
         service.Release();
         Assert.Equal(ShutdownOutcome.ServiceNoncompletion, result.Outcome);
         Assert.True(result.HostShutdownCancellationRequested);
@@ -526,6 +548,70 @@ public sealed class ShutdownHarnessTests
         Assert.Equal(ShutdownOutcome.StartupNoncompletion, result.Outcome);
         await Task.Delay(1000);
         Assert.Equal(1, service.DisposeCount);
+    }
+
+    [Fact(Timeout = 3000)]
+    public async Task CleanupStopThatOutlivesItsBudgetStillDisposesTheServiceEventually()
+    {
+        var service = new StartFailureWithGatedStopService();
+        var result = await ShutdownHarness
+            .For(service)
+            .WithCleanupDeadline(TimeSpan.FromMilliseconds(10))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.StartupFailure, result.PrimaryOutcome);
+        Assert.Equal(ShutdownOutcome.CleanupNoncompletion, result.CleanupOutcome);
+        Assert.False(result.CleanupCompleted);
+
+        service.ReleaseStop();
+        var disposed = await Task.WhenAny(service.Disposed, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(service.Disposed, disposed);
+        Assert.Equal(1, service.DisposeCount);
+    }
+
+    [Fact]
+    public async Task AsyncOnlyDisposalCompletesAndIsOwnedExactlyOnce()
+    {
+        var service = new AsyncDisposableService();
+        var result = await ShutdownHarness.For(service).RunAsync();
+
+        Assert.Equal(ShutdownOutcome.CleanCompletion, result.Outcome);
+        Assert.True(result.CleanupCompleted);
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, service.DisposeAsyncCount);
+    }
+
+    [Fact]
+    public async Task AsyncOnlyDisposalFaultIsReportedSeparately()
+    {
+        var service = new AsyncDisposableService(disposeException: new AsyncCleanupException());
+        var result = await ShutdownHarness.For(service).RunAsync();
+
+        Assert.Equal(ShutdownOutcome.CleanCompletion, result.PrimaryOutcome);
+        Assert.Equal(ShutdownOutcome.CleanupFailure, result.CleanupOutcome);
+        Assert.Equal(ShutdownOutcome.CleanupFailure, result.Outcome);
+        Assert.Equal(typeof(AsyncCleanupException).FullName, result.CleanupExceptionTypeName);
+        Assert.False(result.CleanupCompleted);
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, service.DisposeAsyncCount);
+    }
+
+    [Fact(Timeout = 3000)]
+    public async Task AsyncOnlyDisposalNoncompletionIsBoundedAndEventuallyOwned()
+    {
+        var service = new AsyncDisposableService(blockDispose: true);
+        var result = await ShutdownHarness
+            .For(service)
+            .WithCleanupDeadline(TimeSpan.FromMilliseconds(10))
+            .RunAsync();
+
+        Assert.Equal(ShutdownOutcome.CleanupNoncompletion, result.Outcome);
+        Assert.False(result.CleanupCompleted);
+        Assert.False(result.Succeeded);
+        service.ReleaseDispose();
+        var disposed = await Task.WhenAny(service.Disposed, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.Same(service.Disposed, disposed);
+        Assert.Equal(1, service.DisposeAsyncCount);
     }
 
     [Fact]
@@ -771,6 +857,34 @@ public sealed class ShutdownHarnessTests
         }
     }
 
+    private sealed class UnrelatedCancellationAfterStoppingService : BackgroundService
+    {
+        private readonly ShutdownProbe _entry;
+        private readonly ShutdownProbe _stopping;
+
+        public UnrelatedCancellationAfterStoppingService(ShutdownProbe entry, ShutdownProbe stopping)
+        {
+            _entry = entry;
+            _stopping = stopping;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            _entry.MarkObserved();
+            using var registration = _stopping.ObserveCancellation(stoppingToken);
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                using var unrelated = new CancellationTokenSource();
+                unrelated.Cancel();
+                throw new OperationCanceledException(unrelated.Token);
+            }
+        }
+    }
+
     private sealed class StopFaultService : IHostedService
     {
         private readonly string _message;
@@ -874,14 +988,26 @@ public sealed class ShutdownHarnessTests
     private sealed class BlockingShutdownCancellationService : IHostedService
     {
         private readonly TaskCompletionSource<bool> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _callbackEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.Register(() => _gate.Task.GetAwaiter().GetResult());
             return Task.CompletedTask;
         }
 
-        public Task StopAsync(CancellationToken cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None);
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.Register(() =>
+            {
+                CancellationDelivered = true;
+                _callbackEntered.TrySetResult(true);
+                _gate.Task.GetAwaiter().GetResult();
+            });
+            return Task.Delay(Timeout.InfiniteTimeSpan, CancellationToken.None);
+        }
+
+        public Task CallbackEntered => _callbackEntered.Task;
+        public bool CancellationDelivered { get; private set; }
 
         public void Release() => _gate.TrySetResult(true);
     }
@@ -1005,6 +1131,59 @@ public sealed class ShutdownHarnessTests
             DisposeCount++;
             _disposed.TrySetResult(true);
         }
+    }
+
+    private sealed class StartFailureWithGatedStopService : IHostedService, IDisposable
+    {
+        private readonly TaskCompletionSource<bool> _stopGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int DisposeCount { get; private set; }
+        public Task Disposed => _disposed.Task;
+
+        public Task StartAsync(CancellationToken cancellationToken) => Task.FromException(new InvalidOperationException("synthetic startup failure"));
+        public Task StopAsync(CancellationToken cancellationToken) => _stopGate.Task;
+
+        public void ReleaseStop() => _stopGate.TrySetResult(true);
+
+        public void Dispose()
+        {
+            DisposeCount++;
+            _disposed.TrySetResult(true);
+        }
+    }
+
+    private sealed class AsyncDisposableService : IHostedService, IAsyncDisposable
+    {
+        private readonly TaskCompletionSource<bool> _disposeGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly Exception? _disposeException;
+        private readonly bool _blockDispose;
+
+        public AsyncDisposableService(Exception? disposeException = null, bool blockDispose = false)
+        {
+            _disposeException = disposeException;
+            _blockDispose = blockDispose;
+        }
+
+        public int DisposeAsyncCount { get; private set; }
+        public Task Disposed => _disposed.Task;
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposeAsyncCount++;
+            if (_blockDispose) await _disposeGate.Task.ConfigureAwait(false);
+            if (_disposeException is not null) throw _disposeException;
+            _disposed.TrySetResult(true);
+        }
+
+        public void ReleaseDispose() => _disposeGate.TrySetResult(true);
+    }
+
+    private sealed class AsyncCleanupException : Exception
+    {
     }
 
     private sealed class PartiallyStartedService : IHostedService

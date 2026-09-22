@@ -69,4 +69,18 @@ jobs:
 
       - name: Run bounded lifecycle stress fixture
         if: matrix.os != 'macos-latest'
-        run: dotnet run --project tests/Stress/ShutdownSpec.Stress.Net8.csproj --configuration Release -- --iterations 3000 --max-seconds 120
+        run: dotnet run --project tests/Stress/ShutdownSpec.Stress.Net8.csproj --configuration Release -- --iterations 1000 --max-seconds 300
+
+      - name: Run .NET 10 lifecycle stress comparison
+        if: matrix.os != 'macos-latest'
+        working-directory: tests/Stress
+        run: dotnet run --project ShutdownSpec.Stress.csproj --configuration Release --framework net10.0 -- --iterations 1000 --max-seconds 300
+
+      - name: Run .NET 8 hosting compatibility fixture
+        if: matrix.os != 'macos-latest'
+        run: dotnet run --project tests/Stress/HostingCompatibility/Net8/ShutdownSpec.HostingCompatibility.Net8.csproj --configuration Release
+
+      - name: Run .NET 10 hosting compatibility fixture
+        if: matrix.os != 'macos-latest'
+        working-directory: tests/Stress
+        run: dotnet run --project HostingCompatibility/Net10/ShutdownSpec.HostingCompatibility.Net10.csproj --configuration Release

@@ -8,6 +8,6 @@
     </ItemGroup>
     <Error Condition="'@(_SensitivePackedItem)' != ''" Text="Sensitive filename cannot be packed: @(_SensitivePackedItem)" />
     <Error Condition="'@(_UnexpectedPackedItem)' != ''" Text="Unexpected pack input cannot be packed: @(_UnexpectedPackedItem)" />
-    <Error Condition="'$(PackageIcon)' != 'icon.png' or !Exists('$(MSBuildProjectDirectory)/../../icon.png')" Text="Shipping package requires the repository-root icon.png." />
+    <Error Condition="'$(PackageIcon)' != 'icon.png' or !Exists('$(MSBuildProjectDirectory)/../../icon.png')" Text="Shipping package requires the repository-root icon.png. Add the file at the repository root and run the package gate again." />
   </Target>
 </Project>

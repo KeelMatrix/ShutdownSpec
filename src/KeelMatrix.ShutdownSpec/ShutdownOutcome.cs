@@ -45,7 +45,7 @@ public enum ShutdownOutcome
     /// <summary>Bounded cleanup did not return before its cleanup deadline.</summary>
     CleanupNoncompletion,
 
-    /// <summary>The execution task canceled without independently observed shutdown-token evidence.</summary>
+    /// <summary>The execution task canceled without a proven association to the service stopping token.</summary>
     ExecutionCancellationUnverified
 }
 

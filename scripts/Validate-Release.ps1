@@ -29,7 +29,8 @@ function Read-RequiredText([string]$RelativePath) {
     }
 
     try {
-        return Get-Content -LiteralPath $path -Raw -Encoding UTF8
+        $text = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+        return $text.Replace("`r`n", "`n").Replace("`r", "`n")
     }
     catch {
         Fail "required file '$RelativePath' could not be read: $($_.Exception.Message)"

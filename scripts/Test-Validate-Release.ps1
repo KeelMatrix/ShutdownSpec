@@ -11,14 +11,25 @@ function New-ScenarioRoot([string]$Name, [string]$SourceRoot, [string]$ParentRoo
         'Directory.Build.props',
         'Directory.Packages.props',
         'CHANGELOG.md',
-        'README.md',
-        'src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj',
-        'src/KeelMatrix.ShutdownSpec/README.md'
+        'src/KeelMatrix.ShutdownSpec/KeelMatrix.ShutdownSpec.csproj'
     )) {
         $sourcePath = Join-Path $SourceRoot $relativePath
         $destinationPath = Join-Path $scenarioRoot $relativePath
         [IO.File]::Copy($sourcePath, $destinationPath, $true)
     }
+
+    Set-Content -LiteralPath (Join-Path $scenarioRoot 'README.md') -Value @(
+        '# Validator fixture',
+        '',
+        'dotnet add package KeelMatrix.ShutdownSpec'
+    ) -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $scenarioRoot 'src/KeelMatrix.ShutdownSpec/README.md') -Value @(
+        '# Validator fixture',
+        '',
+        'dotnet add package KeelMatrix.ShutdownSpec',
+        '',
+        '`Microsoft.Extensions.Hosting` 10.0.12'
+    ) -Encoding UTF8
 
     return $scenarioRoot
 }
@@ -59,8 +70,7 @@ $testRoot = Join-Path $temporaryParent "shutdownspec-release-validator-$([Guid]:
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
 try {
-    $passRoot = New-ScenarioRoot 'pass' $sourceRoot $testRoot
-    $passResult = Invoke-Validator $validatorPath $passRoot
+    $passResult = Invoke-Validator $validatorPath $sourceRoot
     Assert-Pass 'finalized changelog' $passResult
 
     $unreleasedRoot = New-ScenarioRoot 'unreleased-entry' $sourceRoot $testRoot

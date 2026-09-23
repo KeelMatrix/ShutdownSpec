@@ -53,7 +53,9 @@ function Assert-FailsWith([string]$Name, [pscustomobject]$Result, [string]$Expec
     if ($Result.ExitCode -eq 0) {
         throw "$Name should fail closed but passed: $($Result.Output)"
     }
-    if (-not $Result.Output.Contains($ExpectedText)) {
+    $normalizedOutput = [regex]::Replace($Result.Output, '\s+', ' ')
+    $normalizedExpectedText = [regex]::Replace($ExpectedText, '\s+', ' ')
+    if (-not $normalizedOutput.Contains($normalizedExpectedText)) {
         throw "$Name failed with unexpected output. Expected '$ExpectedText', got: $($Result.Output)"
     }
 }

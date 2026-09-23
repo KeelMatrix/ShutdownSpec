@@ -70,7 +70,8 @@ $testRoot = Join-Path $temporaryParent "shutdownspec-release-validator-$([Guid]:
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
 try {
-    $passResult = Invoke-Validator $validatorPath $sourceRoot
+    $passRoot = New-ScenarioRoot 'pass' $sourceRoot $testRoot
+    $passResult = Invoke-Validator $validatorPath $passRoot
     Assert-Pass 'finalized changelog' $passResult
 
     $unreleasedRoot = New-ScenarioRoot 'unreleased-entry' $sourceRoot $testRoot

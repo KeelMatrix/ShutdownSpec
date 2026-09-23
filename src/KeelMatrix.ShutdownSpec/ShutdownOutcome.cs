@@ -42,7 +42,7 @@ public enum ShutdownOutcome
     /// <summary>The service did not complete startup or readiness before the startup deadline.</summary>
     StartupNoncompletion,
 
-    /// <summary>Bounded cleanup did not return before its cleanup deadline.</summary>
+    /// <summary>Bounded best-effort cleanup StopAsync, pending lifecycle work, or disposal did not finish within the cleanup budget.</summary>
     CleanupNoncompletion,
 
     /// <summary>The execution task canceled without a proven association to the service stopping token.</summary>

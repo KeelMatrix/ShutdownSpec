@@ -47,6 +47,24 @@ sealed class Worker : BackgroundService
 
 The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Readiness is reported separately from the independently observed execution-entry checkpoint; a readiness probe never proves that the execution body entered. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
+## Direct `IHostedService`
+
+For a service with no `BackgroundService` loop, pass the service directly through the same framework-neutral API:
+
+```csharp
+var result = await ShutdownHarness
+    .For(() => new DirectService())
+    .RunAsync();
+
+result.ShouldCompleteWithoutFault();
+
+sealed class DirectService : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+```
+
 Use `WithExecutionProbe` for an application-owned checkpoint marked from the execution body. When testing expected cancellation, use `WithStoppingProbe` with a `ShutdownProbe` registered through `ObserveCancellation`; cancellation without those independent observations is reported conservatively.
 
 After `StopAsync` returns, an observable `BackgroundService.ExecuteTask` is still awaited within the remaining configured bounds. A task that remains running is reported as `ServiceNoncompletion`; completion, fault, and cancellation are classified from the final observed task state.
@@ -84,4 +102,8 @@ See the [canonical lifecycle contract](https://github.com/KeelMatrix/ShutdownSpe
 - `StartupNoncompletion` means `StartAsync` or the readiness probe exceeded the startup deadline. Check the readiness probe and startup path before increasing the deadline.
 - `FactoryNoncompletion` means the synchronous service factory did not return before the outer deadline. The harness bounds its wait, but it cannot interrupt a synchronous block in the same process.
 - `ServiceNoncompletion` means stop or an observable execution task did not finish before the applicable shutdown/outer deadline. `StopCompleted` can be true when a custom `StopAsync` returns early; inspect the execution state and exact deadline provenance.
-- `CleanupNoncompletion` means disposal did not return before the cleanup deadline. Use process isolation when a hard interruption boundary is required.
+- `StartupFailure` means startup threw. Inspect `ExceptionTypeName` and `ExceptionMessage`, then fix the service or host setup before changing deadlines.
+- `ServiceNoncompletion` after ignored cancellation means the execution task or stop path did not finish. Honor the stopping token, register a `WithStoppingProbe`, and inspect `ExecutionState` and the deadline flags.
+- `HarnessDeadline` means the outer safety bound expired; distinguish it from `ShutdownDeadlineFired` and only increase `WithHarnessDeadline` after removing the blocked work.
+- `CleanupFailure` means bounded cleanup threw after the primary outcome. `CleanupNoncompletion` means bounded best-effort cleanup `StopAsync`, pending lifecycle work, or disposal did not finish within the cleanup budget. Make cleanup cancellation-aware; use process isolation when a hard interruption boundary is required.
+- Scheduler-sensitive tests should assert probes and bounded state with practical deadline margins, not exact millisecond ordering. Repeat the scenario when investigating flakiness and keep host, service, and harness cancellation concepts separate.

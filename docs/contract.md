@@ -2,9 +2,11 @@
 
 This document defines the v1 result semantics for KeelMatrix.ShutdownSpec. The harness checks an in-process lifecycle contract; it does not replace the host or prove external system durability.
 
+This document is the source of truth for outcome semantics and the supported-platform/dependency-boundary compatibility statement. The README files summarize and link here; stress documentation records run-specific evidence.
+
 ## Supported platforms and dependency boundary
 
-The package is validated on Windows, Linux, and macOS by the repository's public CI matrix. Its dependency/runtime boundary is `Microsoft.Extensions.Hosting` 10.0.12 with `net8.0` and `netstandard2.0` target frameworks. This is the canonical supported-platform statement for the repository; other documentation surfaces should link here when they need the full claim.
+The package is validated on Windows, Linux, and macOS by the repository's public CI matrix. Its dependency/runtime boundary is `Microsoft.Extensions.Hosting` 10.0.12 with `net8.0` and `netstandard2.0` target frameworks. The isolated .NET 8 compatibility fixture separately requests `Microsoft.Extensions.Hosting` 8.0.1; on the validated .NET 8 runtime it loads `Microsoft.Extensions.Hosting.Abstractions` with informational version 8.0.10. That distinction is evidence about the requested package versus the hosting assembly actually executed, not a change to the package dependency boundary. The .NET 10 fixture requests and reports 10.0.12.
 
 ## Scenario lifecycle
 
@@ -39,7 +41,7 @@ The defaults are 5 seconds for startup, 5 seconds for graceful shutdown, 15 seco
 | `FactoryFailure` | The service factory failed before startup began. |
 | `FactoryNoncompletion` | The service factory did not return before the outer harness deadline. |
 | `StartupNoncompletion` | `StartAsync` or the readiness probe did not complete before the startup phase deadline. |
-| `CleanupNoncompletion` | Disposal did not return before the cleanup deadline; this is never a successful result. |
+| `CleanupNoncompletion` | Bounded best-effort cleanup could not finish within the cleanup budget because cleanup `StopAsync`, pending lifecycle work, or disposal remained incomplete; this is never a successful result. |
 | `ExecutionCancellationUnverified` | The observed execution task canceled after stop began, but the cancellation token could not be proven to be the application stopping token. |
 
 An unexpected fault or cancellation from an unrelated source never becomes a clean result. A cancellation already present before graceful stop is classified as an execution fault; cancellation observed after stop begins is classified as expected cancellation only when the completed execution task preserves the same token that the independently configured stopping probe registered, with execution entry also observed. Otherwise the result is `ExecutionCancellationUnverified` or `ExecutionNotStarted`. Readiness is exposed as `ReadinessObserved` and never contributes to `ExecutionEntered`, which is driven only by the execution-entry probe. A service that ignores cancellation is classified as `ServiceNoncompletion`, even if a later cleanup task eventually finishes. A phase deadline and the outer deadline set only their corresponding provenance flag; a stop or post-stop observation that reaches the outer deadline remains `ServiceNoncompletion` with `HarnessDeadlineFired=true` and `ShutdownDeadlineFired=false`.

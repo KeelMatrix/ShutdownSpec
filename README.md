@@ -49,6 +49,24 @@ sealed class Worker : BackgroundService
 
 The returned `ShutdownResult` records lifecycle facts and a stable `ShutdownOutcome`. Readiness is reported separately from the independently observed execution-entry checkpoint; a readiness probe never proves that the execution body entered. Assertion methods throw `ShutdownAssertionException`, so the same API works with xUnit, NUnit, MSTest, or plain code.
 
+## Direct `IHostedService`
+
+For a service with no `BackgroundService` loop, pass the service directly through the same framework-neutral API:
+
+```csharp
+var result = await ShutdownHarness
+    .For(() => new DirectService())
+    .RunAsync();
+
+result.ShouldCompleteWithoutFault();
+
+sealed class DirectService : IHostedService
+{
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+```
+
 After `StopAsync` returns, an observable `BackgroundService.ExecuteTask` is still awaited within the remaining configured bounds. A task that remains running is reported as `ServiceNoncompletion`; completion, fault, and cancellation are classified from the final observed task state.
 
 ## Host-backed mode
@@ -85,6 +103,14 @@ Direct mode remains the simplest option and does not require constructing a full
 ## Supported frameworks
 
 The package targets `net8.0` and `netstandard2.0` and uses `Microsoft.Extensions.Hosting` 10.0.12 for the hosted-service contract. The repository's public CI matrix validates it on Windows, Linux, and macOS. See the [canonical supported-platform statement](https://github.com/KeelMatrix/ShutdownSpec/blob/main/docs/contract.md#supported-platforms-and-dependency-boundary) for the full compatibility boundary.
+
+## Troubleshooting
+
+- `StartupFailure`: inspect the startup exception and host/service setup before changing deadlines.
+- Ignored cancellation: if the result is `ServiceNoncompletion`, honor the stopping token, add a stopping probe, and inspect `ExecutionState` plus deadline flags.
+- `HarnessDeadline`: distinguish the outer safety bound from `ShutdownDeadlineFired`; increase the harness bound only after removing blocked work.
+- Cleanup failure: inspect `CleanupFailure` exception details. `CleanupNoncompletion` means bounded best-effort cleanup `StopAsync`, pending lifecycle work, or disposal did not finish within the cleanup budget.
+- Scheduler-sensitive tests: assert probes and bounded state with practical margins, not exact millisecond ordering; repeat the scenario when investigating flakiness.
 
 ## License
 

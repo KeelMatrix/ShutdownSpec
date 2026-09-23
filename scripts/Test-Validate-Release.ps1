@@ -17,7 +17,7 @@ function New-ScenarioRoot([string]$Name, [string]$SourceRoot, [string]$ParentRoo
     )) {
         $sourcePath = Join-Path $SourceRoot $relativePath
         $destinationPath = Join-Path $scenarioRoot $relativePath
-        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+        [IO.File]::Copy($sourcePath, $destinationPath, $true)
     }
 
     return $scenarioRoot

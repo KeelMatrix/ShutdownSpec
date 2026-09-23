@@ -145,6 +145,37 @@ foreach ($reference in @($shippingProject.SelectNodes("//*[local-name()='Package
 
 $changelogText = Read-RequiredText 'CHANGELOG.md'
 $changelogLines = @($changelogText -split "`r?`n")
+
+if ($FirstPublicRelease) {
+    $unreleasedHeadingIndexes = @()
+    for ($index = 0; $index -lt $changelogLines.Count; $index++) {
+        if ($changelogLines[$index] -match '^##[ \t]+\[Unreleased\][ \t]*$') {
+            $unreleasedHeadingIndexes += $index
+        }
+    }
+
+    foreach ($unreleasedHeadingIndex in $unreleasedHeadingIndexes) {
+        $unreleasedSectionEnd = $changelogLines.Count
+        for ($index = $unreleasedHeadingIndex + 1; $index -lt $changelogLines.Count; $index++) {
+            if ($changelogLines[$index] -match '^##[ \t]+') {
+                $unreleasedSectionEnd = $index
+                break
+            }
+        }
+
+        $unreleasedSectionLines = if ($unreleasedSectionEnd -gt ($unreleasedHeadingIndex + 1)) {
+            @($changelogLines[($unreleasedHeadingIndex + 1)..($unreleasedSectionEnd - 1)])
+        }
+        else {
+            @()
+        }
+        $unreleasedContentLines = @($unreleasedSectionLines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($unreleasedContentLines.Count -gt 0) {
+            Fail "initial public release [$tagVersion] requires an empty [Unreleased] section; found release-note content."
+        }
+    }
+}
+
 $releaseHeadingPattern = '^##[ \t]+\[(?<version>\d+\.\d+\.\d+)\](?<suffix>.*)$'
 $targetHeadingIndexes = @()
 $releaseRecords = @()

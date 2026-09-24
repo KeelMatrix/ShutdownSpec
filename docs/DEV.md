@@ -48,6 +48,14 @@ pwsh -NoProfile -File scripts/Validate-Release.ps1 -Tag v0.1.0 -FirstPublicRelea
 
 The validator fails closed when the tag, changelog, package version, dependency versions, or README install commands disagree. It also rejects planned/unreleased entries, missing dates, and first-release entries that contain categories other than `Added` or remediation-history wording. The same command runs as the first gate in the tag-scoped release workflow.
 
+## Post-publish verification
+
+NuGet.org adds a repository signature entry (`.signature.p7s`) to a published package. Compare the workflow-built `.nupkg` with the published `.nupkg` per archive entry, excluding only `.signature.p7s`; every remaining entry must have the same hash in both archives. Verify the published package signature separately by confirming `.signature.p7s` is present and that NuGet reports a valid repository signature. Do not assert whole-file SHA-256 equality between the workflow artifact and the published package.
+
+For `0.1.0`, exact-byte parity does not hold for this reason: the workflow artifact is 92,640 bytes with SHA-256 `7bd61528cca09bd5d7711d8aca7ccf8b180e0f2d21c4b150826b53d69c31cbb4`, while the published package is 105,729 bytes with SHA-256 `7fe3cd2eb6cd2f8cbd14732b54a3d7eacf335040eca37d6bc9fff836c4cfc2fd`. The only archive entry present only in the published package is `.signature.p7s`; there are no workflow-only entries and no differing hashes among common entries.
+
+Symbol packages are not served by the v3 flat container, so its 404 response is not package content. Download the published symbols from the authoritative endpoint `https://www.nuget.org/api/v2/symbolpackage/KeelMatrix.ShutdownSpec/0.1.0` and require its SHA-256 to equal the workflow-built `.snupkg`. For `0.1.0`, the endpoint returned 26,704 bytes with SHA-256 `fd697bbfae744b3ba8d9ba9c4f14080704c868fcadbb52674911011833ec1837`, equal to the workflow artifact.
+
 ## API baseline
 
 The shipping project references `Microsoft.CodeAnalysis.PublicApiAnalyzers` unconditionally. Every supported public entry is recorded in `src/KeelMatrix.ShutdownSpec/PublicAPI.Shipped.txt`; `PublicAPI.Unshipped.txt` is header-only after release preparation.

@@ -62,12 +62,7 @@ function Assert-FailsWith([string]$Name, [pscustomobject]$Result, [string]$Expec
 
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $validatorPath = Join-Path $PSScriptRoot 'Validate-Release.ps1'
-$temporaryParent = if ([string]::IsNullOrWhiteSpace($env:PAPERCLIP_RUN_SCRATCH_DIR)) {
-    [IO.Path]::GetTempPath()
-}
-else {
-    $env:PAPERCLIP_RUN_SCRATCH_DIR
-}
+$temporaryParent = [IO.Path]::GetTempPath()
 $testRoot = Join-Path $temporaryParent "shutdownspec-release-validator-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 

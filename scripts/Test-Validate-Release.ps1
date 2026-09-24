@@ -87,7 +87,11 @@ try {
     $plannedRoot = New-ScenarioRoot 'planned-heading' $sourceRoot $testRoot
     $plannedPath = Join-Path $plannedRoot 'CHANGELOG.md'
     $plannedText = Get-Content -LiteralPath $plannedPath -Raw -Encoding UTF8
-    $plannedText = $plannedText.Replace('## [0.1.0] - 2026-09-23', '## [0.1.0] - Planned')
+    $plannedTextBeforeReplacement = $plannedText
+    $plannedText = $plannedText -replace '(?m)^## \[0\.1\.0\] - \d{4}-\d{2}-\d{2}\r?$', '## [0.1.0] - Planned'
+    if ($plannedText -eq $plannedTextBeforeReplacement) {
+        throw 'planned-heading fixture replacement did not apply.'
+    }
     Set-Content -LiteralPath $plannedPath -Value $plannedText -Encoding UTF8 -NoNewline
     $plannedResult = Invoke-Validator $validatorPath $plannedRoot
     Assert-FailsWith 'Planned heading' $plannedResult 'still contains pre-release wording in its heading'

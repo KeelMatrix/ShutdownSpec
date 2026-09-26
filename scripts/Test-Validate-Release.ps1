@@ -35,7 +35,7 @@ function New-ScenarioRoot([string]$Name, [string]$SourceRoot, [string]$ParentRoo
 }
 
 function Invoke-Validator([string]$ValidatorPath, [string]$RepositoryRoot) {
-    $outputLines = & pwsh -NoProfile -File $ValidatorPath -Tag v0.1.0 -FirstPublicRelease -RepositoryRoot $RepositoryRoot 2>&1
+    $outputLines = & pwsh -NoProfile -WindowStyle Hidden -File $ValidatorPath -Tag v0.1.0 -FirstPublicRelease -RepositoryRoot $RepositoryRoot 2>&1
     $exitCode = $LASTEXITCODE
     return [pscustomobject]@{
         ExitCode = $exitCode

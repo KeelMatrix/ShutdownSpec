@@ -2,6 +2,13 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../build/Invoke-NestedPwsh.ps1')
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$launchGuard = Join-Path $repositoryRoot 'build/Test-NestedPwshLaunch.ps1'
+& $launchGuard -SelfTest
+if ($LASTEXITCODE -ne 0) { throw 'Nested PowerShell launch guard self-test failed.' }
+& $launchGuard
+if ($LASTEXITCODE -ne 0) { throw 'Nested PowerShell launch guard failed.' }
 
 function New-ScenarioRoot([string]$Name, [string]$SourceRoot, [string]$ParentRoot) {
     $scenarioRoot = Join-Path $ParentRoot $Name
@@ -35,7 +42,7 @@ function New-ScenarioRoot([string]$Name, [string]$SourceRoot, [string]$ParentRoo
 }
 
 function Invoke-Validator([string]$ValidatorPath, [string]$RepositoryRoot) {
-    $outputLines = & pwsh -NoProfile -WindowStyle Hidden -File $ValidatorPath -Tag v0.1.0 -FirstPublicRelease -RepositoryRoot $RepositoryRoot 2>&1
+    $outputLines = Invoke-NestedPwsh -NoProfile -File $ValidatorPath -Tag v0.1.0 -FirstPublicRelease -RepositoryRoot $RepositoryRoot 2>&1
     $exitCode = $LASTEXITCODE
     return [pscustomobject]@{
         ExitCode = $exitCode

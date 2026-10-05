@@ -29,6 +29,8 @@ $version = $Version
 $nupkgName = "$packageId.$version.nupkg"
 $snupkgName = "$packageId.$version.snupkg"
 $sensitivePackageEntryPattern = '(?i)(^|/)(?:.*\.env(?:\..*)?|.*\.(?:pfx|snk|key)|AGENTS\.md|.*(?:secret|credential).*)$'
+$websiteMetadataValidator = Join-Path $repoRoot 'scripts/Validate-WebsiteMetadata.ps1'
+$websiteMetadataSelfTest = Join-Path $repoRoot 'scripts/Test-Validate-WebsiteMetadata.ps1'
 
 if ($ReleaseReadiness -and -not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
     throw "Release-readiness package gate requires the repository-root icon.png. Add the file at the repository root and run the package gate again."
@@ -38,6 +40,13 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Version must be a stable sema
 if (-not $artifactRoot.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Package artifacts must stay inside the repository: $artifactRoot"
 }
+
+& $websiteMetadataSelfTest -RepositoryRoot $repoRoot
+& $websiteMetadataValidator -RepositoryRoot $repoRoot
+[xml]$shippingProjectXml = [IO.File]::ReadAllText($project)
+$sourceDescription = $shippingProjectXml.SelectSingleNode("//*[local-name()='Description']").InnerText.Trim()
+$sourcePackageTags = $shippingProjectXml.SelectSingleNode("//*[local-name()='PackageTags']").InnerText.Trim()
+$canonicalRepositoryUrl = 'https://github.com/KeelMatrix/ShutdownSpec'
 
 if (Test-Path -LiteralPath $gateRoot) {
     Remove-Item -LiteralPath $gateRoot -Recurse -Force
@@ -214,7 +223,19 @@ try {
     $metadata = $nuspec.package.metadata
     if ($metadata.id -ne $packageId -or $metadata.version -ne $version) { throw 'Package id or version is incorrect.' }
     if ($metadata.readme -ne 'README.md' -or $metadata.license.type -ne 'file' -or $metadata.license.'#text' -ne 'LICENSE') { throw 'Package readme or license metadata is incorrect.' }
-    if ($metadata.repository.type -ne 'git' -or $metadata.repository.url -ne 'https://github.com/KeelMatrix/ShutdownSpec') { throw 'Repository metadata is incorrect.' }
+    if ($metadata.description -cne $sourceDescription -or [string]::IsNullOrWhiteSpace($metadata.description)) { throw 'Package description does not match the non-empty source description.' }
+    if ($metadata.projectUrl -cne $canonicalRepositoryUrl) { throw 'Package project URL is not the canonical KeelMatrix/ShutdownSpec repository URL.' }
+    if ($metadata.repository.type -ne 'git' -or $metadata.repository.url -ne $canonicalRepositoryUrl) { throw 'Repository metadata is incorrect.' }
+    $sourceTagTokens = @($sourcePackageTags -split '[;\s]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -CaseSensitive)
+    $packageTagTokens = @(([string]$metadata.tags -split '[;\s]+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -CaseSensitive)
+    if ($sourceTagTokens.Count -ne $packageTagTokens.Count) { throw 'Packed package tags do not match package source tags.' }
+    for ($tagIndex = 0; $tagIndex -lt $sourceTagTokens.Count; $tagIndex++) {
+        if ($sourceTagTokens[$tagIndex] -cne $packageTagTokens[$tagIndex]) { throw 'Packed package tags do not match package source tags.' }
+    }
+    $packageTypes = @($nuspec.SelectNodes("//*[local-name()='packageTypes']/*[local-name()='packageType']"))
+    if ($packageTypes.Count -gt 1 -or ($packageTypes.Count -eq 1 -and $packageTypes[0].GetAttribute('name') -cne 'Dependency')) {
+        throw 'Package type must remain the standard Dependency type.'
+    }
     $dependencyGroups = @($metadata.dependencies.group | ForEach-Object targetFramework | Sort-Object)
     if (Compare-Object -ReferenceObject @('.NETStandard2.0', 'net8.0') -DifferenceObject $dependencyGroups) { throw 'Package dependency target frameworks are incorrect.' }
     foreach ($group in @($metadata.dependencies.group)) {

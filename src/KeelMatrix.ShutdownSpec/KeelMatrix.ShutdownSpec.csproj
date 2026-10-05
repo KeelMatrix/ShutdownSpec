@@ -7,7 +7,7 @@
     <RootNamespace>KeelMatrix.ShutdownSpec</RootNamespace>
     <PackageId>KeelMatrix.ShutdownSpec</PackageId>
     <Description>Contract-tests graceful shutdown for .NET IHostedService and BackgroundService implementations. Verifies cancellation, completion, faults and bounded shutdown with deterministic diagnostics.</Description>
-    <PackageTags>dotnet;testing;backgroundservice;ihostedservice;hosted-service;graceful-shutdown;cancellation;worker-service</PackageTags>
+    <PackageTags>dotnet;testing;backgroundservice;ihostedservice;hosted-service;graceful-shutdown;cancellation;worker-service;keelmatrix-public-product;keelmatrix-primary</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageIcon>icon.png</PackageIcon>
@@ -15,7 +15,7 @@
     <Authors>KeelMatrix</Authors>
     <RepositoryUrl>https://github.com/KeelMatrix/ShutdownSpec</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageProjectUrl>https://github.com/KeelMatrix/ShutdownSpec#readme</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/KeelMatrix/ShutdownSpec</PackageProjectUrl>
     <PackageReleaseNotes>Initial release of the deterministic hosted-service shutdown contract harness.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

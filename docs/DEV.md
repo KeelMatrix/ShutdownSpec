@@ -38,6 +38,8 @@ It checks dimensions that exceed a byte and confirms that non-512x512 and oversi
 
 The package gate restores the solution, runs the same fail-closed direct-and-transitive vulnerability audit used by release verification, builds the shipping project, validates the exact package payload and metadata, and restores the non-solution consumer from an isolated local feed with a fresh global-packages folder. The audit runs `dotnet list KeelMatrix.ShutdownSpec.sln package --vulnerable --include-transitive --configfile NuGet.config` and fails on a vulnerable package, an advisory-service error, a command failure, or an incomplete report. The shipping pack target requires the repository-root `icon.png` in ordinary development and release-readiness mode; release-readiness mode also fails closed when that icon is absent or invalid before the package is built.
 
+The package gate runs scripts/Test-Validate-WebsiteMetadata.ps1 and scripts/Validate-WebsiteMetadata.ps1 before packing. The self-test covers public and internal visibility, primary and component roles, manifest schema, package membership, sentinel matching and multiplicity, canonical GitHub URLs, and dependency package type. The validator keeps keelmatrix.website.json, packable-project membership, package role, visibility sentinels, and canonical GitHub repository metadata aligned. The gate then checks the packed description, project and repository URLs, tags, and NuGet package type against the source contract.
+
 ## Release validation before tag creation
 
 After the intended `CHANGELOG.md` entry has a final version and date, validate the exact tag contract before creating or pushing that tag:
